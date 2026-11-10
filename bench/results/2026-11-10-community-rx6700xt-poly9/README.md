@@ -23,3 +23,5 @@ The Q4_K_XL configuration uses the identical main GGUF hash as the same-day Stra
 All files here are official-suite output or supporting configuration/provenance. Private synthetic context/recall comparisons and Avalon experiments are excluded. No engine changes or model weights are submitted. This is contributor evidence, pending maintainer review.
 
 See [the recording checklist](WHAT_TO_RECORD.md) for model repository pins, explicit defaults, full timing logs, measured resource snapshots and unavailable values.
+
+Exact main/draft repository paths, pinned revisions, byte sizes and matching upstream LFS SHA256 values are recorded in [MODEL_IDENTITIES.json](MODEL_IDENTITIES.json). Generated subreport prose was corrected against verified host/configuration facts: 64 GiB physical versus 56 GiB guest memory, and deliberately selected benchmark settings. Original measurement JSON and privately retained harness outputs remain unchanged.

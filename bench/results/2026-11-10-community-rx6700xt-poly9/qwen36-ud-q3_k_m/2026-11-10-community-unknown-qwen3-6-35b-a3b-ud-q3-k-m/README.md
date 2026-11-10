@@ -1,28 +1,28 @@
-# Community benchmark on AMD Radeon
+# Community benchmark on RX 6700 XT 12 GiB
 
 Measured on 2026-11-10 with `tools/strata_bench.py` (suite 1, 3 runs per test, medians with ranges). Speeds are the engine's own timings; first-token times are measured by the client over HTTP. Speed only: no correctness check was run.
 
 ## Hardware and software
 
-- GPU and VRAM: AMD Radeon, 12 GiB VRAM
-- CPU: AMD Ryzen 5 3600 6-Core Processor (6 cores, 10 threads); installed RAM: 56.0 GiB; storage: not measured
-- OS: Linux 7.0.14-26-pve; GPU driver: not read; CUDA: not read
-- PolyStrata: project 0.1.45, commit 83a7a332; engine 0.1.45
-- Background workloads and power limits: not recorded
+- GPU and VRAM: one RX 6700 XT, nominal 12 GiB VRAM, GPU index 0.
+- CPU: Ryzen 5 3600, 6 cores / 12 host logical threads; physical RAM: 64 GiB DDR4-3200. The LXC allocation was 56 GiB with 10 visible CPU threads. Storage: Intel 660p 1 TB NVMe.
+- OS: Debian 13 (trixie), kernel 7.0.14-26-pve; driver: in-kernel amdgpu, module source version B1D135B579C294611EB792D; ROCm SDK 7.13.0a20260515. CUDA was not used.
+- PolyStrata v0.1.45-poly.9, source 83a7a33272413bf87b8d2742dc557c165e2cb2d2; native gfx1031 HIP build, embedded engine version 0.1.45.
+- Other GPU containers and inference services were stopped; a lightweight resource sampler ran outside the guest. GPU power cap: 211 W; measured PCIe link: 16 GT/s x16.
 
 ## Model and configuration
 
 - Model and quantization: qwen3.6-35b-a3b-ud-q3_k_m
 - Context: 65536 tokens; parallel slots: 1
-- Settings: the install's own configuration, unchanged; thinking off for the suite; temperature 0
+- Settings: the attached benchmark configuration; thinking off and temperature 0 for the suite. Conversation cache 0, 8 CPU workers and 1024 MiB VRAM reserve were deliberately selected. Source defaults apply where flags are omitted; these are not claimed as untouched installation defaults.
 
 ```text
-strata-poly --model Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --kv-whole --max-context 65536 --expert-profile qwen36-ud-q3_k_m-official.txt --conversation-cache-mib 0 --threads 8 --vram-reserve-mib 1024
+strata-poly --serve --model Qwen3.6-35B-A3B-UD-Q3_K_M.gguf --kv-whole --max-context 65536 --expert-profile qwen36-ud-q3_k_m-official.txt --conversation-cache-mib 0 --threads 8 --vram-reserve-mib 1024
 ```
 
 ## Method
 
-Run by `python tools/strata_bench.py --long` against the HTTP API of a PolyStrata server (started by the benchmark from the install configuration); model loading is not timed. One warm-up chat and a 1K prompt are discarded first. Every prompt starts with a unique tag, so the conversation cache cannot help the fresh-prompt tests.
+Run by `python tools/strata_bench.py --long` against the HTTP API of a PolyStrata server (started by the benchmark from the attached benchmark configuration); model loading is not timed. One warm-up chat, two word/token-ratio calibration probes and a 1K warm-up prompt are discarded first. Every prompt starts with a unique tag, so the conversation cache cannot help the fresh-prompt tests.
 
 - short chat: the three questions of `tools/ab_engine.py`, up to 100 new tokens, 3 runs
 - 4K / 16K prompts: generated word lists sized by a calibration request, 24 new tokens, 3 fresh prompts each
@@ -58,4 +58,12 @@ Per-request data: `results.json`. Engine log lines from the start: `engine-log-e
 
 ## Correctness and limitations
 
-Not measured: this is a speed suite. The conversation uses the model's own replies, so token counts differ a little between runs. Machine details come from the server, `nvidia-smi`/`rocm-smi` and the OS; background load and power limits are not recorded. Total time of the suite: 265 s.
+Not measured: this is a speed suite. The conversation uses the model's own replies, so token counts differ a little between runs. The raw harness machine fields are preserved in results.json. The hardware/software facts above supplement those fields with verified host and package provenance; guest memory is distinct from installed physical RAM. Total time of the suite: 265 s.
+
+Verified settings, immutable model identities, full logs and resource timing limits: [recording checklist](../../WHAT_TO_RECORD.md). The descriptive corrections above do not alter results.json or the original retained harness output.
+
+Sanitized replay from the pinned source checkout (replace the configuration path placeholders with local paths; choose a new output directory):
+
+```text
+python tools/strata_bench.py --config bench/results/2026-11-10-community-rx6700xt-poly9/qwen36-ud-q3_k_m/published-config.json --long --out <new-output-directory>
+```

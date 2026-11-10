@@ -9,8 +9,9 @@
       },
       "2026-11-10-community-unknown-qwen3-6-35b-a3b-ud-q3-k-m/README.md": {
         "original_sha256": "19c4db5686398f0c320bf81db1336eaf05257576b5664320e12232af1535b150",
-        "published_sha256": "19c4db5686398f0c320bf81db1336eaf05257576b5664320e12232af1535b150",
-        "string_redactions_only": true
+        "published_sha256": "cdf7643a6b96088853aa7b09b22f1a2f738c7a97a98b4fd2010e5c14dc82d8af",
+        "string_redactions_only": false,
+        "report_prose_corrected_from_verified_provenance": true
       },
       "2026-11-10-community-unknown-qwen3-6-35b-a3b-ud-q3-k-m/results.json": {
         "original_sha256": "580fa6ee812067b84c90f97319b7417b1c0979815c99bf8712bd53f58846a2d5",
@@ -41,8 +42,9 @@
       },
       "2026-11-10-community-unknown-qwen3-6-35b-a3b-ud-q4-k-m/README.md": {
         "original_sha256": "9b5d75a1a6e133a769a1c0ce4b872f8e9f36c1e92743d1a2c46960b88b6e7543",
-        "published_sha256": "9b5d75a1a6e133a769a1c0ce4b872f8e9f36c1e92743d1a2c46960b88b6e7543",
-        "string_redactions_only": true
+        "published_sha256": "f181ec7a50242277cc4556008bafda93ec38ce19c88b219a704dc3caf9d669b3",
+        "string_redactions_only": false,
+        "report_prose_corrected_from_verified_provenance": true
       },
       "2026-11-10-community-unknown-qwen3-6-35b-a3b-ud-q4-k-m/results.json": {
         "original_sha256": "2bba80883cdbc84eb110f3ad5dc70f8650d0f5827f911469d7caf943cb1b4fff",
@@ -73,8 +75,9 @@
       },
       "2026-11-10-community-unknown-gemma-4-26b-a4b-ud-q4-k-m/README.md": {
         "original_sha256": "e3212cea9d38f1e26e2bf44c7d8d948f5b7ce37d53fcf2a42b70b86002b6b057",
-        "published_sha256": "e3212cea9d38f1e26e2bf44c7d8d948f5b7ce37d53fcf2a42b70b86002b6b057",
-        "string_redactions_only": true
+        "published_sha256": "055de9c27ba4c05e2a1038845b0cc1db191c3a4f7f82188ea284eec22b398bb4",
+        "string_redactions_only": false,
+        "report_prose_corrected_from_verified_provenance": true
       },
       "2026-11-10-community-unknown-gemma-4-26b-a4b-ud-q4-k-m/results.json": {
         "original_sha256": "f79ba6feae9dd1bbed902a3745f239b38ea12209417f073e8a4a929970281647",
@@ -105,8 +108,9 @@
       },
       "2026-11-10-community-unknown-tiel-coder-35b-a3b-ud-q3-k-xl/README.md": {
         "original_sha256": "3ab9fe1074026e03056c676e1b60debc78dc1ab75de09b28108322f0933d949a",
-        "published_sha256": "3ab9fe1074026e03056c676e1b60debc78dc1ab75de09b28108322f0933d949a",
-        "string_redactions_only": true
+        "published_sha256": "901179638d869b8549564f7fff001e96836b266db404db9467cf41414feb478d",
+        "string_redactions_only": false,
+        "report_prose_corrected_from_verified_provenance": true
       },
       "2026-11-10-community-unknown-tiel-coder-35b-a3b-ud-q3-k-xl/results.json": {
         "original_sha256": "e11dfad64fcf9f0657dbaace6244ce26678d77f12793abe811b6f27d7a6e2abb",
@@ -137,8 +141,9 @@
       },
       "2026-11-10-community-unknown-qwen3-6-35b-a3b-ud-q4-k-xl/README.md": {
         "original_sha256": "c278a7d143319c2da23fa6f33a1bc3cf1a9c9a5c4c3f2958b12d4c423319aed3",
-        "published_sha256": "c278a7d143319c2da23fa6f33a1bc3cf1a9c9a5c4c3f2958b12d4c423319aed3",
-        "string_redactions_only": true
+        "published_sha256": "e830756b219c040970c5e59736703eaf0b5efe8bac6b9d8dead346ad7e7919d8",
+        "string_redactions_only": false,
+        "report_prose_corrected_from_verified_provenance": true
       },
       "2026-11-10-community-unknown-qwen3-6-35b-a3b-ud-q4-k-xl/results.json": {
         "original_sha256": "6309dd12fc93dedc48d99fe478a8cb6ef307ad1938ef8ecab4a7667f362aace4",
@@ -160,6 +165,12 @@
         "published_sha256": "6d13ff93a03b1f827091503d808e0b9642e02a7cacb8ca0d89e89b11f7bd5fdd",
         "string_redactions_only": true
       }
+    }
+  },
+  "additional_public_provenance": {
+    "MODEL_IDENTITIES.json": {
+      "sha256": "475b913ea1f399f193a6898f993c2e915e89b527fbfc586a6a9135fc7927256f",
+      "scope": "Exact benchmark main/draft artifact content at immutable published repository revisions; no inference about original historical download dates."
     }
   }
 }
