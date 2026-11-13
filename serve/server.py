@@ -2344,6 +2344,11 @@ def vision_start_error(line: str, log=None) -> str:
                 "may use the card, and the engine already holds it. Check with: nvidia-smi --query-gpu=compute_mode "
                 "--format=csv; set it back with: sudo nvidia-smi -c DEFAULT (or run the encoder on another card). "
                 "First line from the encoder: " + (text or "(none)"))
+    if not text:   # it ended without a line (issue 162): the reason is in its stderr, the log's last lines
+        last = [ln.strip() for ln in tail.splitlines() if ln.strip()][-6:]
+        where = getattr(log, "name", None) or "the model's .log file"
+        return ("the vision encoder ended before it was ready; the last lines of " + where + ":\n" + "\n".join(last)
+                if last else "the vision encoder ended before it was ready and wrote nothing to " + where)
     return "the vision encoder did not start: " + text
 
 
