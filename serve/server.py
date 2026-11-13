@@ -2748,8 +2748,10 @@ def engine_args(cfg: dict) -> list[str]:
     if layer_split_of(cfg) and cfg.get("split_skip_if_fits") and "--split-skip-if-fits" not in args:
         args.append("--split-skip-if-fits")
     # #533 (opt-in): "vram_elastic": true - the expert cache in segments, so POST /v1/vram can give VRAM back to other
-    # programs and take it back; "vram_segment_mib" sets the segment size (the engine's default: 512)
-    if cfg.get("vram_elastic") is True and "--vram-elastic" not in args:
+    # programs and take it back; "vram_segment_mib" sets the segment size (the engine's default: 512).  strata-poly
+    # has neither option and ends at one it does not know: its cache is resized by VRAM as it is (vram_elastic=1 in
+    # its INFO line)
+    if cfg.get("vram_elastic") is True and "--vram-elastic" not in args and not poly:
         args.append("--vram-elastic")
         seg = cfg.get("vram_segment_mib")
         if isinstance(seg, int) and not isinstance(seg, bool) and seg > 0 and "--vram-segment-mib" not in args:
@@ -7483,7 +7485,13 @@ def start_model(cfg: dict, tok, lazy: bool = False):
         vcfg = {k: (os.path.abspath(os.path.join(cfg.get("cwd") or ".", v))
                     if k in ("exe", "mmproj", "model") and isinstance(v, str) and not os.path.isabs(v) else v)
                 for k, v in cfg["vision"].items()}
-        if vcfg.get("elastic") is True and vcfg.get("gpu") and cfg.get("vram_elastic") is not True:
+        if vcfg.get("elastic") is True and vcfg.get("gpu") and poly_engine(cfg):
+            # the turns around the encoder ask for a reserve of 0: the whole cache for the Strata project's engine,
+            # strata-poly's smallest reserve (256 MiB, under the one it started with)
+            print('[strata] the vision section\'s "elastic" does not start a GPU encoder on demand with strata-poly: '
+                  "the encoder starts with the model (an encoder on the CPU starts with the first picture)", flush=True)
+            vcfg["elastic"] = False
+        elif vcfg.get("elastic") is True and vcfg.get("gpu") and cfg.get("vram_elastic") is not True:
             print('[strata] the vision section\'s "elastic" needs "vram_elastic": true (the expert cache gives the '
                   "encoder its VRAM): the encoder starts with the model instead", flush=True)
             vcfg["elastic"] = False
