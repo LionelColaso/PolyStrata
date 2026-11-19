@@ -216,6 +216,16 @@ class NoBrowser(unittest.TestCase):
             self.assertNotIn("--open", text(script))
             self.assertIn('"--port" "8080"', text(script))
 
+    def test_windows_run_script_has_standard_crlf_endings(self):
+        with tempfile.TemporaryDirectory() as d, unittest.mock.patch.object(setup, "ROOT", Path(d)), \
+                unittest.mock.patch.object(setup, "WIN", True):
+            script = setup.write_run_script("Q2_0", Path(d) / "strata-q2_0.json", 8080)
+            raw = script.read_bytes()
+            self.assertNotIn(b"\r\r\n", raw)
+            self.assertEqual(raw.count(b"\r\n"), 5)
+            self.assertEqual(raw.count(b"\n"), 5)
+            self.assertTrue(raw.endswith(b"\r\n"))
+
     def start_cmd(self, cfg, keep=None):
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "strata.exe"

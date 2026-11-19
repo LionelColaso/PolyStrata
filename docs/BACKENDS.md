@@ -33,6 +33,18 @@ from then keeps its engine and moves to the new name the next time setup updates
 The optional CUDA [GDN prefill adapter](DETAILS.md#strata-poly-chunked-gdn-prefill) uses
 `STRATA_GDN_MMA=1` for eligible Qwen35 reads. It is off by default; that section lists its shape and device limits.
 
+### Groot 19B-A3B 261023 (Q4_K_M text measured on one card)
+
+`python setup.py --family groot` offers the same setup questions as Tiel Coder and Qwen3.6: choose one of Bartowski's
+three quantizations (Q4_K_M by default, Q6_K or Q8_0, 12.5 to 20.2 GB) and the optional 0.9 GB image projector
+through the existing `qwen35moe` path. Their tensor headers match
+that backend. Q4_K_M text ran on Windows 11 with an 8 GB RTX 5060 Laptop: chat, streaming, separate reasoning
+and one tool call, at 1,296–1,905 prefill and 95–97 decode tokens/s ([the measured run](models/groot.md#measured-on-an-rtx-5060-laptop-8-gb)).
+Q6_K, Q8_0, images, Linux and other cards still need validation. The shared context menu
+offers 8K, 32K (default), 64K and 128K; `--context` overrides it. The engine detects the embedded MTP block normally.
+Hardware-aware expert caching, CPU experts, parallel requests and multi-GPU settings use the shared paths, not a
+specific card preset. Installation and estimates are in [groot.md](models/groot.md).
+
 ## Install
 
 Setup installs all of them. They are in its list of models, and each has a family name that goes
@@ -106,7 +118,9 @@ and wants about 26 GB of RAM; two cards with layer split hold it all in VRAM. At
 read a 32K prompt at 1,017 tokens/s (first token 32.7 s) and wrote 91; two read it at 2,179 tokens/s
 (first token 15.3 s) and wrote 93, the medians of three runs. It also takes `--kv q8_0`: the attention
 caches as ggml Q8_0 blocks, 544 bytes a row instead of 1,024, the window layers' rings included; fp16 is
-the default and that path is unchanged.
+the default and that path is unchanged. Like Strata, strata-poly also supports `--kv-resident N` (opt-in):
+only N cells stay resident in VRAM while the rest is kept in system RAM, freeing several gigabytes of VRAM
+at long contexts (e.g. 256K on Ornith 1.5 122B) for the expert cache.
 
 A family's first size is the one setup takes. On a PC with less RAM than that wants it takes the second, the
 smallest, and the third is by name: `--model UD-Q4_K_M`, `--model APEX-I-QUALITY`, `--model UD-Q4_K_XL`. The
