@@ -3012,6 +3012,8 @@ void Engine::follow_loop() {
     }
 }
 
+int Engine::swap_half() const { return kSwapHalf; }
+
 // The cache follows what is written.  Called at the start of an eval, where nothing queued reads the cache, with
 // the number of tokens the eval writes (0 for a prompt batch).  The experts whose upload has arrived get their
 // slots.  Then, for written tokens, the experts used lately that the cache lacks start on their way, each to the
@@ -3091,7 +3093,7 @@ void Engine::follow(int written) {
         n_free += s.at.load() == Swap::kFree;
     }
     if (written <= 0) return;
-    const float keep = std::exp2(-(float) written / (float) kSwapHalf);
+    const float keep = std::exp2(-(float) written / (float) swap_half());
     for (float& r : recent_) r *= keep;
     const auto from_pool = [&](Swap& s) {   // the slot follow_loop() copies s from, held until s arrives
         s.from = -1;

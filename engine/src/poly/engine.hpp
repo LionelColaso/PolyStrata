@@ -543,6 +543,8 @@ protected:
     /// A token's experts outside VRAM may go to the host's threads through the doorbell (h_bell_): the architecture
     /// routes on the card (route_card()) and sums a token's experts in moe_card() when moe_sum_later() is false.
     virtual bool bells() const { return false; }
+    /// follow(): the tokens over which an expert's recent uses halve (kSwapHalf for every family but Inkling 2).
+    virtual int swap_half() const;
     /// What save_layer() writes of layer il that its run under way changes: all of it where a layer runs once a token.
     virtual void save_run(int il, int64_t pos, uint8_t* dst) { save_layer(il, pos, dst); }
     /// Optional host hook called before layer_head (including when layer_head is graph-replayed).
@@ -1371,7 +1373,7 @@ protected:
     std::condition_variable swap_cv_;
     bool swap_quit_ = false;
     std::string swap_error_;         ///< why the thread stopped; follow() throws it
-    std::vector<float> recent_;      ///< per (layer, expert): its uses by written tokens, halved every kSwapHalf
+    std::vector<float> recent_;      ///< per (layer, expert): its uses by written tokens, halved every swap_half()
     std::vector<uint8_t> coming_;    ///< per (layer, expert): on its way into the cache
     std::vector<Pick> in_, out_;     ///< per trade number: the experts to bring in, and the ones to give up
     std::vector<size_t> trade_at_;   ///< per trade number: how many of its pairs follow() has taken
