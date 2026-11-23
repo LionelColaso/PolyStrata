@@ -1147,7 +1147,12 @@ protected:
     uint8_t* h_state_ = nullptr;   ///< pinned: save_state()'s way to its caller's memory, and read()'s checkpoints'
     void* ev_saved_ = nullptr;     ///< marks read()'s copy of a checkpoint's state into one of them
     size_t h_state_bytes_ = 0;
+    std::vector<uint8_t*> h_marks_;   ///< pinned: read()'s checkpoints' states after the first (mark_buffers())
+    size_t h_mark_bytes_ = 0;         ///< the size of each of them
+    size_t marks_wanted_ = 0;         ///< the most checkpoints after the first that a read has had
     void state_out(const uint8_t* from, uint8_t* to);
+    std::vector<uint8_t*> stage_marks(const Mark* marks, int n_marks);
+    void mark_buffers();
     int cached_ = 0;
 
     // device scratch: a layer's input streams, one stream, the normed input, the attention's and the FFN's output
