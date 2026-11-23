@@ -46,6 +46,7 @@ constexpr size_t kTail = 256;
 // noisy, and an upload gets in the way of the work: a slot goes to an expert that will clearly be used more.
 constexpr float kSwapMin = 2.f;
 constexpr int kSwapHalf = 128;
+constexpr int kSwapTrades = 64;   // trades follow() asks a token at most, whatever Options::expert_swaps
 constexpr int kFarTrades = 4;   // card_far_: trades a window asks (Engine::follow())
 // Engine::pick_way(): each way of a window is timed this many times before the faster one is taken.  What a way
 // takes moves, most in an answer's first windows, while the cache comes to hold the answer's experts, so the way

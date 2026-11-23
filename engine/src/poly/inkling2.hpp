@@ -149,6 +149,15 @@ private:
     // to 82.3% at 2 swaps a token instead of 0.6: an answer moves from topic to topic faster than 128 tokens follow.
     // STRATA_SWAP_HALF=N sets it (128 is main's).
     int swap_half() const override;
+    // 128 uploads at a time, not 64.  After a long read the cache has hundreds of empty slots (740 of 860 after
+    // 32K tokens of IQ4_NL on an 8 GB card), which follow() fills first, as many a token as uploads are free: 64 a
+    // token used about half the bus while the first tokens ran mostly on the CPU.  Trades in an answer stay at 1-2 a
+    // token, so this only fills the cache sooner after a read.  --expert-swaps N sets it.
+#if defined(STRATA_GPU_METAL)
+    int default_swaps() const override { return 64; }   // Metal's arena holds back their bytes (fill_expert_cache())
+#else
+    int default_swaps() const override { return 128; }
+#endif
 #if defined(STRATA_USE_HIP)
     // the shared expert is one memset (moe_shared()), and a graph launch a layer for it cost an RX 9070 XT's host
     // more than the memset: with experts on the CPU (no doorbell on HIP) a token's layers are launched one by one
