@@ -371,7 +371,8 @@ void Inkling2::ds_load() {
     const auto mat = [&](const std::string& name, uint64_t n_in, uint64_t n_out) {
         const TensorInfo* t = f.find(name);
         const uint32_t type = t ? t->type : 0;
-        find(name, type == kTypeBF16 ? kTypeBF16 : 8u, n_in, n_out);   // BF16 or Q8_0
+        // BF16, or a type the card's products take (lin(): Q8_0 as published, or a smaller quantization of it)
+        find(name, type == kTypeBF16 || kernels::native_mmvq_supported((int) type) ? type : 8u, n_in, n_out);
         return Dev{to_dev(t), type, (int) n_in, (int) n_out};
     };
     const uint64_t E = (uint64_t) n_embd_, hq = (uint64_t) n_head_ * head_dim_, kv = (uint64_t) n_kv_ * head_dim_,
