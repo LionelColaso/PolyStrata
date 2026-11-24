@@ -626,6 +626,10 @@ protected:
     /// True: a call's whole pass is recorded with programmatic dependent launches (pdl.hpp, pdl_scope()): a kernel
     /// launched with launch_pdl() starts while the one before it ends, and waits for it in pdl_wait().
     virtual bool whole_pdl() const { return false; }
+    /// False: a token's layers (run() of one token) are recorded and replayed only while its experts are routed on
+    /// the card (card_routes(): its whole pass can be one recording), and are otherwise launched one by one.  Windows
+    /// and step()'s rows keep their recordings.
+    virtual bool layer_records() const { return true; }
     /// layer_head() takes step()'s rows in one call: the products for every row at once, and each row's recurrent
     /// state and attention rows from its own sequence (rows_of_, seq_state(), seq_buf()), its position from at_.
     /// Otherwise step() runs the head a row at a time, with the row's sequence bound.

@@ -6987,6 +6987,7 @@ void Engine::run(const int32_t* tokens, int n) {
     bool replay = opt_.graphs && n <= opt_.window && (windowed_ || block_pass_ || n == 1) && !opt_.dump &&
                   !prompt_scratch_;
     for (int t = 0; t < n && replay; ++t) replay = !image_at(pos_ + t);
+    if (replay && n == 1 && !layer_records() && !card_routes()) replay = false;   // a token's own launches
     const auto replayed = [&](std::vector<void*>& made, size_t key, auto&& work) {
         if (made.size() <= key) made.resize(key + 1, nullptr);
         if (!made[key]) made[key] = record(work);
