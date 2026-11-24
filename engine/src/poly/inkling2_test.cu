@@ -460,6 +460,26 @@ void case_clips() {
             ink_clips(st, stream());
             same_bits(tag + ": the stores", keys.get(), keys2.get());
             same_bits(tag + ": the stores (values)", vals.get(), vals2.get());
+            if (!kv8) {   // the fp16 stores against store_f16() / ink_store_ring() and store_f16_at() of the same rows
+                const int n = kKv * kDim;
+                Dev<uint8_t> k3(cache_bytes(false, cells)), v3(cache_bytes(false, cells)), k4(cache_bytes(false, cells)),
+                    v4(cache_bytes(false, cells));
+                Dev<long long> at(std::vector<long long>{pos, 0});
+                if (ring) {
+                    ink_store_ring(dk2, (uint16_t*) k3.p, n, pos, rows, ring, stream());
+                    ink_store_ring(dv2, (uint16_t*) v3.p, n, pos, rows, ring, stream());
+                } else {
+                    store_f16(dk2, (uint16_t*) k3.p, n, pos, rows, stream());
+                    store_f16(dv2, (uint16_t*) v3.p, n, pos, rows, stream());
+                }
+                store_f16_at(dk2, (uint16_t*) k4.p, n, at.p, rows, ring, stream());
+                store_f16_at(dv2, (uint16_t*) v4.p, n, at.p, rows, ring, stream());
+                const char* plain = ring ? "ink_store_ring()" : "store_f16()";
+                same_bits(tag + ": K stored = " + plain, keys.get(), k3.get());
+                same_bits(tag + ": V stored = " + plain, vals.get(), v3.get());
+                same_bits(tag + ": K stored = store_f16_at()", keys.get(), k4.get());
+                same_bits(tag + ": V stored = store_f16_at()", vals.get(), v4.get());
+            }
             // the K reference, and the rows where the stores put it
             std::vector<double> kref(k.size());
             for (size_t h = 0; h < (size_t) rows * kKv; ++h)
