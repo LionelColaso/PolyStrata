@@ -1016,13 +1016,24 @@ void Engine::mind_memory() {
 }
 
 #ifdef STRATA_VMM_EQUAL_PIECES
-// Whether a reservation's pieces must all be of one size (hip_compat/cuda.h): under WSL2, where ROCm reaches the card
+// Whether every reservation's pieces must all be of one size (hip_compat/cuda.h): under WSL2, where ROCm reaches the card
 // through librocdxg (/dev/dxg, and no /dev/kfd).  STRATA_VMM_EQUAL_PIECES=1 or 0 says it for any Linux HIP build.
 static bool vmm_equal_pieces() {
     static const bool on = [] {
         if (const char* v = std::getenv("STRATA_VMM_EQUAL_PIECES"); v && v[0]) return v[0] != '0';
         std::error_code ec;
         return std::filesystem::exists("/dev/dxg", ec) && !std::filesystem::exists("/dev/kfd", ec);
+    }();
+    return on;
+}
+
+// Whether the expert cache's pieces must all be of one size: on every Linux HIP build.  Native ROCm 7.2.4 (/dev/kfd,
+// an RX 9070 XT) refuses the shorter last piece of that reservation, as WSL2 does; the other reservations (attention
+// caches, the staging buffer, a prompt's work memory) map as before there.  STRATA_ARENA_EQUAL_PIECES=0 turns it off.
+static bool arena_equal_pieces() {
+    static const bool on = [] {
+        if (const char* v = std::getenv("STRATA_ARENA_EQUAL_PIECES"); v && v[0]) return v[0] != '0';
+        return true;
     }();
     return on;
 }
@@ -1061,7 +1072,7 @@ void Engine::vmm_reserve(Mapped& m, size_t bytes) {
     CUdeviceptr p = 0;
 #ifdef STRATA_VMM_EQUAL_PIECES
     // with equal pieces, a whole number of their units
-    m.reserved = up_to(std::max<size_t>(bytes, 1), pool_on_ ? pg_ : vmm_equal_pieces() ? vmm_unit(grain_) : grain_);
+    m.reserved = up_to(std::max<size_t>(bytes, 1), pool_on_ ? pg_ : (m.equal || vmm_equal_pieces()) ? vmm_unit(grain_) : grain_);
 #else
     m.reserved = up_to(std::max<size_t>(bytes, 1), pool_on_ ? pg_ : grain_);   // a whole number of pool handles
 #endif
@@ -1163,8 +1174,13 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
     // throws as a card that has no more VRAM does
     if (pool_on_) piece = pg_;
 #ifdef STRATA_VMM_EQUAL_PIECES
-    if (!pool_on_ && vmm_equal_pieces()) {   // whole pieces of the reservation's one size
-        piece = vmm_piece(m.reserved, m.pieces.empty() ? 0 : m.pieces.front().second, bytes, piece, vmm_unit(grain_));
+    if (!pool_on_ && (m.equal || vmm_equal_pieces())) {   // whole pieces of the reservation's one size
+        // an expert cache that was cut to nothing keeps its piece size for the next map (native only: under WSL
+        // vmm_equal_pieces() chooses it again, as before)
+        const bool keep = m.equal && !vmm_equal_pieces();
+        piece = vmm_piece(m.reserved, m.pieces.empty() ? (keep ? m.piece0 : 0) : m.pieces.front().second, bytes, piece,
+                          vmm_unit(grain_));
+        if (keep && m.pieces.empty()) m.piece0 = piece;
         bytes = std::min(up_to(bytes, piece), m.reserved);
     } else {
         bytes = std::min(up_to(bytes, pool_on_ ? pg_ : grain_), m.reserved);
@@ -2416,13 +2432,47 @@ void Engine::fill_expert_cache() {
     if (vmm_) {   // in pieces, so that it can give some up to the attention caches (shrink_cache()) and grow
 #ifdef STRATA_VMM_EQUAL_PIECES
         // with equal pieces, a whole number of kArenaPiece, so that its pieces can all be of that size (vmm_map())
-        if (!arena_.base)
-            vmm_reserve(arena_, pool_on_ || !vmm_equal_pieces() ? most + 256 : up_to(most + 256, kArenaPiece));
+        if (!arena_.base) {
+            arena_.equal = arena_equal_pieces();
+            vmm_reserve(arena_, pool_on_ || !(arena_.equal || vmm_equal_pieces()) ? most + 256 : up_to(most + 256, kArenaPiece));
+        }
 #else
         if (!arena_.base) vmm_reserve(arena_, most + 256);   // addresses only: grow_cache() maps more of them
 #endif
+        size_t arena_piece = kArenaPiece;
+#ifdef STRATA_VMM_EQUAL_PIECES
+        if (!pool_on_ && arena_.equal && !vmm_equal_pieces() && free_b > reserve) {   // native; WSL sizes as before
+            arena_.piece0 = 0;   // chosen again for this load
+            // With equal pieces a map covers whole pieces, so it must be sized to the pieces that fit under free
+            // minus the reserve, never past it: a cap that needs the room rounded up to a piece is tried with 32 and
+            // 16 MiB pieces too, and a cache the room limits is rounded down to whole pieces of the size that holds the
+            // most.  A piece the cache already has stays the size.
+            const size_t unit = vmm_unit(grain_), room = free_b - reserve;
+            const size_t front = arena_.pieces.empty() ? 0 : arena_.pieces.front().second;
+            const auto mapped = [&](size_t want, size_t p, bool down) {
+                const size_t pc = vmm_piece(arena_.reserved, front, want, p, unit);
+                return std::min(down ? want / pc * pc : up_to(want, pc), arena_.reserved);
+            };
+            const size_t sizes[3] = {kArenaPiece, kArenaPiece / 2, kArenaPiece / 4};
+            const size_t n = front ? 1 : 3, want = arena + 256;
+            bool fits = false;
+            if (arena >= all)
+                for (size_t i = 0; i < n && !fits; ++i)
+                    if (mapped(want, front ? kArenaPiece : sizes[i], false) <= room) fits = true, arena_piece = sizes[i];
+            if (!fits) {
+                size_t best = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    const size_t b = mapped(std::min(want, room), front ? kArenaPiece : sizes[i], true);
+                    if (b > best) best = b, arena_piece = sizes[i];
+                }
+                arena = best > 256 ? best - 256 : 0;
+                if (expert_cap_ > 0 && arena < all) short_of(arena, all);
+                if (arena == 0) return;
+            }
+        }
+#endif
         try {
-            vmm_map(arena_, arena + 256, kArenaPiece, "the expert cache");
+            vmm_map(arena_, arena + 256, arena_piece, "the expert cache");
         } catch (const std::runtime_error&) {   // the card may not have it all (grow_cache() is just as tolerant)
             arena = arena_.mapped > 256 ? arena_.mapped - 256 : 0;
             if (expert_cap_ > 0 && arena < all) short_of(arena, all);
