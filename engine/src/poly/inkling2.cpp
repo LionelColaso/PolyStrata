@@ -524,11 +524,11 @@ DsScreen Inkling2::ds_screen() const {
 // mixed into each drafter layer's keys and values at the rows' positions and the Markov head's context.
 void Inkling2::ds_commit(int n) {
     const size_t E = (size_t) n_embd_;
-    output_rows(0, n, ds_tap_ + 3 * (size_t) rows_ * E);
+    output_rows(0, n, ds_tap_ + 3 * (size_t) buf_rows_ * E);
     const DsPos p{recording_ ? at_ : nullptr, (long long) pos_};
     DsMix m;
     m.tap = ds_tap_;
-    m.tap_stride = (size_t) rows_ * E;
+    m.tap_stride = (size_t) buf_rows_ * E;
     m.alpha = ds_alpha_;
     for (int l = 0; l < 3; ++l) m.norm[l] = ds_[(size_t) l].dflare;
     m.norm[3] = ds_mnorm_;
@@ -732,7 +732,7 @@ bool Inkling2::scores_apart() const {
 #ifdef STRATA_VMM_RELEASE_WITH_ADDRESSES
     return false;
 #else
-    return !ds_file_ && !freeze_experts_asked_ && mmq_ && vmm_ && !split_ && rows_ >= kStageRows;
+    return !freeze_experts_asked_ && mmq_ && vmm_ && !split_ && rows_ >= kStageRows;
 #endif
 }
 
@@ -1192,7 +1192,7 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
     if (ds_file_) {   // the drafter's features: the inputs of three layer runs
         const int visit = visit_of(il, pass_of(il));
         for (int k = 0; k < 3; ++k)
-            if (visit == ds_visit_[k]) copy_rows(r_, ds_tap_ + (size_t) k * rows_ * n_embd_, n);
+            if (visit == ds_visit_[k]) copy_rows(r_, ds_tap_ + (size_t) k * buf_rows_ * n_embd_, n);
     }
     Slot& S = slots_[(size_t) slot_of(il, pass_of(il))];
     const size_t ne = (size_t) n * n_embd_;
