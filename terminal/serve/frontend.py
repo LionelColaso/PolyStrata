@@ -3479,6 +3479,7 @@ class InklingOutputParser(OutputParser):
     def _call(self, body: str) -> list[Event]:
         """A call block's body, {"name": NAME, "args": {...}}: the call, or the block as text."""
         raw = INK_MSG + self.header + "<|content_invoke_tool_json|>" + body
+        started, self.scall = self.scall, None    # the call announced at its header, for this block only
         try:
             obj = json.loads(body)
         except ValueError:
@@ -3493,7 +3494,10 @@ class InklingOutputParser(OutputParser):
         call = ToolCall(name, args)
         out = []
         if self.stream_tools:
-            out.append(Event("tool_start", call=call))
+            if started is not None:               # announced at its header: the final event keeps that id
+                call.id = started.id
+            else:
+                out.append(Event("tool_start", call=call))
             out.append(Event("tool_args", json.dumps(args, ensure_ascii=False), call=call))
         out.append(Event("tool_call", call=call))
         return out
@@ -3538,6 +3542,13 @@ class InklingOutputParser(OutputParser):
                     return out
                 at, tag = min(found)
                 self.header, self.ink, self.mode = s[:at], s[at + len(tag):], INK_KINDS[tag]
+                if self.mode == "call" and self.stream_tools:
+                    # the call is announced once its header names it, as the other forms do when the name is
+                    # complete; its arguments follow whole when the block ends (_call)
+                    name = self.aliases.get(self.header.strip(), self.header.strip())
+                    if name and self._callable(name):
+                        self.scall = ToolCall(name, {})
+                        out.append(Event("tool_start", call=self.scall))
                 continue
             # inside a block: its text up to <|end_message|> (or the next message's start, where the end was left out)
             ends = [(i, len(t)) for i, t in ((s.find(INK_END), INK_END), (s.find(INK_MSG), "")) if i >= 0]

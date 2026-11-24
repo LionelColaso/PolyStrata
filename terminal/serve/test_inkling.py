@@ -466,6 +466,34 @@ class Replies(unittest.TestCase):
         self.assertEqual(evs[0].call.id, evs[2].call.id)
         self.assertEqual(json.loads(evs[1].text), {"city": "Oslo"})
 
+    def test_a_streamed_call_is_announced_at_its_header(self):
+        # the call is announced as soon as its header names it, not when its block ends: a long call's arguments
+        # can take minutes to write, and the client and the server's status saw nothing until then
+        p = InklingOutputParser(tools=self.TOOLS, stream_tools=True)
+        self.assertEqual([e.kind for e in p.feed(f"{H}get_weather{CJSON}" '{"name":"get_weather","args":{"ci')],
+                         ["tool_start"])
+        self.assertEqual([e.kind for e in p.feed('ty":"Oslo"}}' f"{END}")], ["tool_args", "tool_call"])
+        # each call of a reply is a call of its own
+        text = (f"{H}get_weather{CJSON}" '{"name":"get_weather","args":{"city":"Oslo"}}' f"{END}"
+                f"{H}now{CJSON}" '{"name":"now","args":{}}' f"{END}")
+        for step in self.STEPS:
+            with self.subTest(step=step):
+                evs = events(text, step, self.TOOLS)
+                starts = [e.call.id for e in evs if e.kind == "tool_start"]
+                self.assertEqual(starts, [e.call.id for e in evs if e.kind == "tool_call"])
+                self.assertEqual(len(set(starts)), 2)
+
+    def test_an_announced_call_cut_off_is_no_call(self):
+        # max_tokens inside the arguments: announced, never finished, so the reply has no call (#211's rule)
+        evs = events(f"{H}get_weather{CJSON}" '{"name":"get_weather","args":{"city":"Os', 3, self.TOOLS)
+        self.assertEqual([e.kind for e in evs if e.kind.startswith("tool_")], ["tool_start"])
+        self.assertTrue(said(evs, "content").startswith(f"{H}get_weather{CJSON}"))
+
+    def test_a_tool_not_declared_is_not_announced(self):
+        text = f"{H}delete_all{CJSON}" '{"name":"delete_all","args":{}}' f"{END}"
+        evs = events(text, 4, self.TOOLS)
+        self.assertEqual([e.kind for e in evs if e.kind.startswith("tool_")], [])
+
     def test_a_call_whose_end_tag_did_not_come_before_the_next_block(self):
         for step in (1, 4, 1000):
             with self.subTest(step=step):
