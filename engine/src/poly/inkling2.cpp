@@ -395,10 +395,11 @@ void Inkling2::ds_load() {
         L.q_norm = f32(b + "attn_q_norm.weight", (uint64_t) head_dim_);
         L.k_norm = f32(b + "attn_k_norm.weight", (uint64_t) head_dim_);
         L.k_ctx_norm = f32(b + "attn_k_ctx_norm.weight", (uint64_t) head_dim_);
-        // a window layer's ring holds its window, a block and room past it; a full layer every position
+        // a window layer's ring holds its window, a block and room past it; a full layer every position (in the
+        // growing caches alloc_caches() gave it, where it did)
         L.cap = L.swa ? (int64_t) ds_window_ + 64 : (int64_t) opt_.max_context + 64;
-        L.keys = (uint16_t*) dmalloc((size_t) L.cap * cell, "the drafter's caches");
-        L.vals = (uint16_t*) dmalloc((size_t) L.cap * cell, "the drafter's caches");
+        if (!L.keys) L.keys = (uint16_t*) dmalloc((size_t) L.cap * cell, "the drafter's caches");
+        if (!L.vals) L.vals = (uint16_t*) dmalloc((size_t) L.cap * cell, "the drafter's caches");
         if (L.swa) {   // a conversation taken up again from an earlier place finds later positions in the ring
             L.tags = (long long*) dmalloc((size_t) L.cap * sizeof(long long), "the drafter's caches");
             ck(cudaMemset(L.tags, 0xff, (size_t) L.cap * sizeof(long long)), "the drafter's caches");
@@ -776,6 +777,18 @@ void Inkling2::alloc_caches() {
             s.vals = (uint16_t*) kv_alloc(row, 1);
         }
     }
+#if !defined(STRATA_GPU_METAL)
+    // The drafter's full layers keep a row a position too (fp16 whatever --kv says), and grow with the target's
+    // caches (cover()): sized for the whole context from the start, they took 128 MiB at 32K and 512 MiB at 128K
+    // that the expert cache did without.  The rows a block writes stay inside the context (guess_block()'s nb), so
+    // max_context rows hold them.  (Metal keeps one allocation: metal_cover() moves the caches it grows.)
+    for (DsLayer& L : ds_)
+        if (!L.swa) {
+            const size_t cell = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t);
+            L.keys = (uint16_t*) kv_alloc(cell, 1);
+            L.vals = (uint16_t*) kv_alloc(cell, 1);
+        }
+#endif
 }
 
 // Per-token buffers hold buf_rows_ tokens, row after row.
@@ -1833,6 +1846,16 @@ void Inkling2::load_card_rows(const uint8_t* src, int64_t from, int64_t count, i
     if (from < 0 || first < from || n < 0 || first + n > from + count || first + n > opt_.max_context)
         throw std::logic_error("load_rows: the rows are outside what was saved");
     cover(first + n);
+#if !defined(STRATA_GPU_METAL)
+    // The drafter's full layers' rows are not saved with a conversation: those of the rows brought back may be VRAM
+    // the expert cache had (cover() maps it again), whose bytes can read as NaN halves.  Zeros, as fresh VRAM had.
+    for (const DsLayer& L : ds_)
+        if (!L.swa && n > 0) {
+            const size_t cell = (size_t) n_kv_ * head_dim_ * sizeof(uint16_t);
+            for (uint16_t* c : {L.keys, L.vals})
+                ck(cudaMemsetAsync((uint8_t*) c + (size_t) first * cell, 0, (size_t) n * cell, cs(st_)), "load rows");
+        }
+#endif
     ck(cudaStreamSynchronize(cs(st_)), "load rows");
     const size_t row = kv_row();
     for (const Slot& s : slots_) {
