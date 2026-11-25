@@ -1016,27 +1016,22 @@ void Engine::mind_memory() {
 }
 
 #ifdef STRATA_VMM_EQUAL_PIECES
-// Whether every reservation's pieces must all be of one size (hip_compat/cuda.h): under WSL2, where ROCm reaches the card
-// through librocdxg (/dev/dxg, and no /dev/kfd).  STRATA_VMM_EQUAL_PIECES=1 or 0 says it for any Linux HIP build.
-static bool vmm_equal_pieces() {
-    static const bool on = [] {
-        if (const char* v = std::getenv("STRATA_VMM_EQUAL_PIECES"); v && v[0]) return v[0] != '0';
+// Which reservations' pieces must all be of one size (hip_compat/cuda.h): 2 every one, under WSL2, where ROCm reaches the
+// card through librocdxg (/dev/dxg, and no /dev/kfd); 1 the expert cache's only, on native ROCm 7.2.4 (/dev/kfd, an
+// RX 9070 XT), which refuses its shorter last piece as WSL2 does, while the other reservations (attention caches, the
+// staging buffer, a prompt's work memory) map as before there; 0 none.  STRATA_VMM_EQUAL_PIECES=all (or 1), =arena
+// and =0 say it for any Linux HIP build.
+static int vmm_equal_mode() {
+    static const int mode = [] {
+        if (const char* v = std::getenv("STRATA_VMM_EQUAL_PIECES"); v && v[0])
+            return v[0] == '0' ? 0 : std::strcmp(v, "arena") == 0 ? 1 : 2;
         std::error_code ec;
-        return std::filesystem::exists("/dev/dxg", ec) && !std::filesystem::exists("/dev/kfd", ec);
+        return std::filesystem::exists("/dev/dxg", ec) && !std::filesystem::exists("/dev/kfd", ec) ? 2 : 1;
     }();
-    return on;
+    return mode;
 }
-
-// Whether the expert cache's pieces must all be of one size: on every Linux HIP build.  Native ROCm 7.2.4 (/dev/kfd,
-// an RX 9070 XT) refuses the shorter last piece of that reservation, as WSL2 does; the other reservations (attention
-// caches, the staging buffer, a prompt's work memory) map as before there.  STRATA_ARENA_EQUAL_PIECES=0 turns it off.
-static bool arena_equal_pieces() {
-    static const bool on = [] {
-        if (const char* v = std::getenv("STRATA_ARENA_EQUAL_PIECES"); v && v[0]) return v[0] != '0';
-        return true;
-    }();
-    return on;
-}
+static bool vmm_equal_pieces() { return vmm_equal_mode() == 2; }
+static bool arena_equal_pieces() { return vmm_equal_mode() >= 1; }
 
 // The unit such pieces are made of, 2 MiB like the pool's handles: vmm_reserve() reserves a whole number of them.
 static size_t vmm_unit(size_t grain) { return up_to(size_t(2) << 20, grain); }
