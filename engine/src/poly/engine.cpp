@@ -2806,7 +2806,7 @@ void Engine::narrow_stage() {
 // the buffer holds copies them in rounds, as a call of a layer larger than the buffer always did.  Where a row's
 // product depends on the launch's rows (Mmq::split_exact() false: RDNA4's default BLAS loop, CDNA's stream-k) its last
 // bits then differ from one round's; the margin keeps that to a cache that lost more than the attention caches take,
-// which a frozen cache never does.  STRATA_STAGE_TRIM=0 keeps the whole layer.
+// which a frozen cache never does.  STRATA_POLY_STAGE_FIT=0 keeps the whole layer.
 void Engine::trim_stage() {
 #if defined(STRATA_VMM_RELEASE_WITH_ADDRESSES) && !defined(STRATA_GPU_METAL)
     constexpr int kStageSpare = 4, kAheadSlots = 4;
@@ -4148,7 +4148,7 @@ void Engine::alloc() {
         // makes again smaller: on ROCm 7.2.4 (an RX 9070 XT) the expert cache's addresses then could not be reserved
         // again where they were the next time it gave VRAM back (vmm_unmap()), and the engine stopped.
         {
-            const char* trim = std::getenv("STRATA_STAGE_TRIM");
+            const char* trim = std::getenv("STRATA_POLY_STAGE_FIT");
             stage_trims_ = trims_stage() && opt_.stage_mib <= 0 && widens && !pool_on_ && stage_wide_ == stage_narrow_ &&
                            !(trim && trim[0] == '0');
         }
