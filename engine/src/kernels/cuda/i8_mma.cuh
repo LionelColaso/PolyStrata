@@ -6,7 +6,7 @@
 // m16n8k32 and m16n8k16 with s8 operands; Turing when asked (gemm_iq_i8_turing()), by m8n8k16.
 //
 // A block: WR = 64 weight rows of one matrix x up to 16 NJ of its activation rows (blockIdx.y walks a matrix's rows
-// in such chunks).  K goes in stages of 256 values; a type of 32-value blocks (MXFP4's too; NVFP4: 64) may end inside the last one
+// in such chunks).  K goes in stages of 256 values; a type of 32-value blocks (MXFP4's too; NVFP4 and Q2_0: 64) may end inside the last one
 // (gemm_iq_i8_takes()).  Per stage every thread decodes 8 WR / NT sub-blocks of one weight row (NT threads, 256 or
 // 512: i8m_threads()) into shared memory, the stage's activations are copied beside them, and a warp multiplies 16
 // weight rows with its tiles of 8 activation rows: one MMA per 32 values, or per 16 for a type with a scale per 16.
