@@ -4297,6 +4297,8 @@ class Service:
         # "*" = any), and every name it answers to, which serve() works out from the address it listens on
         self.allowed_hosts: list[str] = []
         self.host_names: set[str] = set(LOOPBACK_NAMES)
+        # the PC's real network IP (what another device types in), shown in About > This PC; worked out once at serve()
+        self.server_ip: str | None = None
         self.status = {"busy": False, "queued": 0}      # GET /status: what the model is doing right now
         self.rate = collections.deque(maxlen=32)        # (time, generated) samples for the live tok/s window
         # "parallel" (the engine's batch slots): every running request's own status and rate window; self.status
@@ -5754,11 +5756,13 @@ class Service:
             engine["vision_note"] = self.vision.cpu_note
         tel = self.telemetry.snapshot() if getattr(self, "telemetry", None) else {"now": {}, "history": {}, "static": {}}
         parked = self.conv_log.poll(getattr(self.engine, "log_path", None), getattr(self.engine, "log_start", None))
+        static = dict(tel["static"])
+        if self.server_ip:                                # About > This PC: the PC's real network IP (no port)
+            static["server_ip"] = self.server_ip
         return {"engine": engine, "live": live, "requests": hist[::-1][:None if all_requests else 12],
                 "conversation_cache": conversation_cache_view(engine, hist, totals, parked),
                 "requests_kept": len(hist), "totals": totals, "hardware": tel["now"],
-                "hardware_static":
-                tel["static"], "history": tel["history"], "time": now}
+                "hardware_static": static, "history": tel["history"], "time": now}
 
     def prometheus(self) -> str:
         """GET /metrics/prometheus: the totals and what is running in Prometheus' text format, under llama-server's
@@ -9106,6 +9110,13 @@ def lan_addresses() -> list[str]:
     return ([first] if ok(first) else []) + sorted(ip for ip in ips if ok(ip) and ip != first)
 
 
+def machine_ip() -> str | None:
+    """The PC's real network IP (what another device types in): its IPv4 addresses on the networks, without loopback
+    or link-local. None when the machine has none (only loopback, or only IPv6)."""
+    ips = lan_addresses()
+    return ", ".join(ips) if ips else None
+
+
 def host_names_for(bind_host: str, allowed_hosts=(), trusted_origins=()) -> set[str]:
     """Every name this server answers to besides an IP address: localhost, the address it listens on, the config's
     allowed_hosts and trusted_origins' hosts, and - listening beyond this PC (0.0.0.0 or a LAN address) - this PC's
@@ -9128,6 +9139,7 @@ def host_names_for(bind_host: str, allowed_hosts=(), trusted_origins=()) -> set[
 
 def serve(svc: Service, host="127.0.0.1", port=8095) -> ThreadingHTTPServer:
     svc.host_names = host_names_for(host, svc.allowed_hosts, svc.trusted_origins)
+    svc.server_ip = machine_ip()                       # About > This PC: the PC's real IP, worked out once at start
     svc.start_telemetry()
     httpd = Server((host, port), make_handler(svc))
     httpd.svc = svc
