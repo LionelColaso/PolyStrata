@@ -1277,8 +1277,15 @@ bool Inkling2::project(const Block& B, const float* const* x, int n, bool quanti
 #else
     constexpr bool mixed = false;
 #endif
+#if defined(STRATA_USE_HIP)
+    // a token's on HIP: a launch for each type among the five, as on Metal (below)
+    const bool by_type = n == 1;
+#else
+    constexpr bool by_type = false;
+#endif
     for (const Dev* d : w)
-        if ((kOneType && !mixed && d->type != w[0]->type) || d->n_in != n_embd_ || d->scale != 1.0f) return false;
+        if ((kOneType && !mixed && !by_type && d->type != w[0]->type) || d->n_in != n_embd_ || d->scale != 1.0f)
+            return false;
     const float* xs[3];
     void* qs[3];
     int nx = 0, slot[3];
@@ -1330,6 +1337,51 @@ bool Inkling2::project(const Block& B, const float* const* x, int n, bool quanti
             *extras = true;
         }
         flush_pending_convs();
+        return true;
+    }
+#endif
+#if defined(STRATA_USE_HIP)
+    // A token's on HIP: native_mmvq_many() of the matrices of each type among the five (plus sink and taps when
+    // quantized), on the inputs quantized once; a type it does not take falls back to lin() with the quantized input.
+    if (n == 1) {
+        const Dev* wa[8] = {w[0], w[1], w[2], w[3], w[4]};
+        float* ya[8] = {y[0], y[1], y[2], y[3], y[4]};
+        int fa[8] = {from[0], from[1], from[2], from[3], from[4]};
+        int count = 5;
+        const auto plain = [&](const Dev& d) {
+            return d.p && d.type != kTypeF32 && d.type != kTypeBF16 && d.n_in == n_embd_ && d.scale == 1.0f;
+        };
+        if (extras && plain(B.sink) && (B.swa || (plain(B.k_dyn) && plain(B.v_dyn)))) {
+            wa[count] = &B.sink, ya[count] = sink_, fa[count++] = 0;
+            if (!B.swa) {
+                wa[count] = &B.k_dyn, ya[count] = kdyn_, fa[count++] = 1;
+                wa[count] = &B.v_dyn, ya[count] = vdyn_, fa[count++] = 2;
+            }
+            *extras = true;
+        }
+        if (!quantized) kernels::native_quantize_q8_1_many(xs, qs, nx, n_embd_, st_);
+        bool done[8] = {};
+        for (int i = 0; i < count; ++i) {
+            if (done[i]) continue;
+            kernels::NativeMmvqMany m{};
+            int at[8], c = 0;
+            for (int j = i; j < count; ++j) {
+                if (done[j] || wa[j]->type != wa[i]->type) continue;
+                m.w[c] = wa[j]->p;
+                m.x_q8_1[c] = qs[slot[fa[j]]];
+                m.y[c] = ya[j];
+                m.n_out[c] = wa[j]->n_out;
+                at[c++] = j;
+                done[j] = true;
+            }
+            m.count = c;
+            if (wa[i]->type != kTypeF32 && wa[i]->type != kTypeBF16 &&
+                kernels::native_mmvq_many_fits((int) wa[i]->type, m, n_embd_)) {
+                kernels::native_mmvq_many((int) wa[i]->type, m, n_embd_, st_);
+                continue;
+            }
+            for (int k = 0; k < c; ++k) lin(*wa[at[k]], x[fa[at[k]]], ya[at[k]], n, qs[slot[fa[at[k]]]]);
+        }
         return true;
     }
 #endif
