@@ -130,7 +130,7 @@ void Inkling2::load_geometry() {
     one_sequence(false, "on Metal");
 #endif
 #if defined(STRATA_USE_HIP)
-    // the _rows kernels are the fused q/k/v and clips kernels HIP does not run (inkling2.cu: clips_apart())
+    // the _rows kernels are the fused q/k/v and clips kernels HIP does not run (inkling2.cu: clips_hip())
     one_sequence(false, "on AMD");
 #endif
     one_sequence(opt_.draft_model.empty(), "with --draft-model");
