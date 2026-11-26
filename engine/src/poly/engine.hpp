@@ -822,6 +822,8 @@ protected:
     struct Mapped {
         unsigned long long base = 0;   ///< a CUdeviceptr
         size_t reserved = 0, mapped = 0;
+        size_t piece0 = 0;    ///< the piece size an equal-piece cache kept when it was cut to nothing
+        bool equal = false;   ///< its pieces are all of one size even where the other reservations' are not (the expert cache)
         std::vector<std::pair<unsigned long long, size_t>> pieces;   ///< allocation handles and their bytes, in order
     };
     struct Kv : Mapped {
