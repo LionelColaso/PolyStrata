@@ -4014,7 +4014,7 @@ void ink_qkv_win(const InkQkv& a, int rows, float* ksnap, float* vsnap, size_t s
     c.ring = a.ring;
     c.kv8 = a.kv8;
     c.kvq8 = a.kvq8;
-    clips_apart(c, stream);
+    clips_hip(c, stream);
 #else
     QkvArgs g{a, 1.0f / std::sqrt((float) ((a.kdyn ? 2 : 1) * a.taps + 1)),
               1.0f / std::sqrt((float) ((a.vdyn ? 2 : 1) * a.taps + 1))};
