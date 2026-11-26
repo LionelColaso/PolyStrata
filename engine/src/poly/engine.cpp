@@ -4306,6 +4306,54 @@ void Engine::state_out(const uint8_t* from, uint8_t* to) {
         for (int i = 0; i < pieces; ++i) piece(i);
 }
 
+// Pinned buffers for the states of a read's checkpoints, where the layers' copies go in the stream: h_state_ for
+// the first, h_marks_ for the others.  A copy into pageable memory returns only once the card has done the work
+// queued before it, so the host stopped issuing launches at each layer of each checkpoint after the first and the
+// card waited for them.  The buffers are made between requests (trim()), as many as a read has had checkpoints
+// after the first: cudaMallocHost() of Inkling 2 Mini's 330 MiB state took 210 ms, and on a thread of its own it
+// held the read's CUDA calls up as long.  They stay pinned, so one is made only while the RAM free holds the ones
+// still to make, the checkpoints' own (pageable) states the next read fills, and two states more; a checkpoint
+// without one goes straight to its state, as before.
+void Engine::mark_buffers() {
+    const size_t bytes = card_state_bytes();
+    if (h_mark_bytes_ < bytes) {   // the states grew: the buffers made for the smaller ones go
+        for (uint8_t* p : h_marks_) hfree(p);
+        h_marks_.clear();
+        h_mark_bytes_ = bytes;
+    }
+    if (h_marks_.size() >= marks_wanted_) return;
+    OnCard here(device_, split_);
+    while (h_marks_.size() < marks_wanted_ && ram_available() >= (2 * (marks_wanted_ - h_marks_.size()) + 2) * bytes) {
+        void* p = nullptr;
+        if (cudaMallocHost(&p, bytes) != cudaSuccess) {
+            cudaGetLastError();
+            break;
+        }
+        host_allocs_.push_back(p);
+        h_marks_.push_back((uint8_t*) p);
+    }
+}
+
+// Null for a mark without a state or a buffer (it goes straight to its state).
+std::vector<uint8_t*> Engine::stage_marks(const Mark* marks, int n_marks) {
+    std::vector<uint8_t*> staged((size_t) n_marks, nullptr);
+    const size_t bytes = card_state_bytes();
+    bool first = h_state_bytes_ >= bytes;
+    size_t k = 0, with_state = 0;
+    for (int m = 0; m < n_marks; ++m) {
+        if (!marks[m].state) continue;
+        ++with_state;
+        if (std::exchange(first, false)) {
+            staged[(size_t) m] = h_state_;
+            continue;
+        }
+        if (h_mark_bytes_ >= bytes && k < h_marks_.size()) staged[(size_t) m] = h_marks_[k++];
+    }
+    // the first goes through h_state_ once save_state() has made it the state's size
+    marks_wanted_ = std::max(marks_wanted_, with_state > 0 ? with_state - 1 : 0);
+    return staged;
+}
+
 // What the state has that is no layer's: the model's output for the last token, which the draft block pairs the
 // next one with.  It lies behind the layers' state.
 void Engine::save_last(uint8_t* dst) {
@@ -4469,6 +4517,7 @@ size_t Engine::covering(int pct) const {
 
 void Engine::trim() {
     relock();   // first: under Linux the pages dropped below must not be locked
+    mark_buffers();   // between requests: the next read's checkpoints all go through pinned memory
     struct Held {
         float recent;
         int64_t used;
@@ -8609,15 +8658,9 @@ bool Engine::read(const int32_t* tokens, int n, const Mark* marks, int n_marks,
     // a turn for each layer, and one for the model's output, which the draft block keeps a row of
     const int turns = hi_ - lo_ + (draft_ ? 1 : 0);
     // A checkpoint's layers are copied in the stream, behind the call before it and ahead of the next one's turn
-    // at the layer, so the card goes on.  The first goes to pinned memory, at the card's speed, and to its state
-    // after the read; the others straight to their states, which are pageable: 2 MB of Qwen3.6's took the card
-    // 1.3 ms a layer.
-    std::vector<uint8_t*> staged((size_t) n_marks, nullptr);
-    for (int m = 0; m < n_marks; ++m)
-        if (marks[m].state && h_state_bytes_ >= card_state_bytes()) {
-            staged[(size_t) m] = h_state_;
-            break;
-        }
+    // at the layer, so the card goes on.  They go to pinned memory, at the card's speed, and to their states after
+    // the read (stage_marks()).
+    const std::vector<uint8_t*> staged = stage_marks(marks, n_marks);
     shared_ahead_ = all >= opt_.stage_ahead;   // (co-reads of fewer tokens: one pack, its own experts)
     try {
         for (int k = 0; k < turns; ++k) {
@@ -8752,12 +8795,7 @@ bool Engine::read_groups(const Mark* marks, int n_marks, const std::function<boo
     int visits = 0;
     for (int il = lo_; il < hi_; il = next_layer(il)) ++visits;
     const int groups = (n_calls + g - 1) / g, steps = groups * visits;
-    std::vector<uint8_t*> staged((size_t) n_marks, nullptr);   // the first mark's state goes through h_state_
-    for (int m = 0; m < n_marks; ++m)
-        if (marks[m].state && h_state_bytes_ >= card_state_bytes()) {
-            staged[(size_t) m] = h_state_;
-            break;
-        }
+    const std::vector<uint8_t*> staged = stage_marks(marks, n_marks);   // pinned buffers of the marks' states
     shared_ahead_ = n >= opt_.stage_ahead;
     const auto restore = [&] {
         r_ = r0;
