@@ -136,8 +136,7 @@ void Inkling2::load_geometry() {
     one_sequence(opt_.draft_model.empty(), "with --draft-model");
     // On several cards (--layer-split) a card runs a run of the layers, and the loop's (core_start_ to core_end_ - 1)
     // are on one card: next_layer() runs them again for a later pass.  Engine::open() starts no card inside them.
-    // The drafter stays on one card: its features are three layer runs' inputs, which may be another card's.
-    need(!split_ || opt_.draft_model.empty(), "Inkling 2's --draft-model runs on one card (no --layer-split)");
+    // The drafter's three taps cross to the next card beside the residual streams (carry_rows(), carried()).
     // --batch with --layer-split has not been run
     one_sequence(!split_, "on several cards (--layer-split)");
     need(opt_.kv_format == KvFmt::kFp16 || opt_.kv_format == KvFmt::kFp8 || opt_.kv_format == KvFmt::kQ8_0,
@@ -820,7 +819,8 @@ void Inkling2::load_layer(int il) {
     const int64_t e = n_embd_, hq = (int64_t) n_head_ * head_dim_, kv = (int64_t) n_kv_ * head_dim_;
 
     if (il == lo_) {   // beside the card's first layer: the input's norm on the first card, the output's mix on the last
-        if (lo_ == 0) tok_norm_ = upload(gg_->find("token_embd_norm.weight"), "token_embd_norm.weight", e, 1, kF32);
+        if (lo_ == 0 || (ds_file_ && hi_ == n_layer_))
+            tok_norm_ = upload(gg_->find("token_embd_norm.weight"), "token_embd_norm.weight", e, 1, kF32);
         if (hi_ == n_layer_)
             out_query_ = upload(gg_->find("output_res_query.weight"), "output_res_query.weight", e, 1, kF32);
     }
@@ -1005,39 +1005,42 @@ void Inkling2::assign_scratch() {
         kvw_halves_ = (size_t) std::min<int64_t>(opt_.max_context, kKvq8WorkRows) * n_kv_ * head_dim_;
         kvw_ = fbuf(kvw_halves_);   // 2 * kvw_halves_ halves
     }
-    if (ds_file_) {   // the drafter's: a call's features and mixes, and a block's rows
+    if (ds_file_) {   // the drafter's: a call's features (every split card), and mixes/block scratch (last card only)
         const size_t E = (size_t) n_embd_, hq = (size_t) n_head_ * head_dim_, kv = (size_t) n_kv_ * head_dim_,
                      B = (size_t) ds_block_, V = (size_t) n_vocab_, R = (size_t) ds_rank_;
         ds_tap_ = ds_home_ = fbuf(kDsTaps * n * E);
-        ds_mix_ = fbuf(3 * n * E);
-        ds_k_ = fbuf(std::max(n, B) * kv);
-        ds_v_ = fbuf(std::max(n, B) * kv);
-        ds_x_ = fbuf(B * E);
-        ds_y_ = fbuf(B * E);
-        ds_q_ = fbuf(B * hq);
-        ds_att_ = fbuf(B * hq);
-        ds_g_ = fbuf(B * ds_ff_);
-        ds_u_ = fbuf(B * ds_ff_);
-        ds_h_ = fbuf(B * E);
-        ds_base_ = fbuf(B * V);
-        ds_z_ = fbuf(V);
-        ds_fy_ = fbuf(V);
-        ds_part_ = fbuf(ds_attend_floats(n_kv_));
-        ds_ctxh_ = fbuf(B * 3 * R);
-        ds_ctxf_ = fbuf(3 * R);
-        ds_in_ = fbuf(2 * R);
-        ds_sp_ = fbuf(3 * R);
-        ds_state_ = fbuf(R);
-        ds_lat_ = fbuf(R);
-        ds_frc_ = fbuf(E);
-        const auto bytes = [&](size_t n) { return (void*) fbuf((n + sizeof(float) - 1) / sizeof(float)); };
-        ds_yq_ = bytes(B * kernels::native_q8_1_bytes(n_embd_));
-        ds_hq_ = bytes(B * kernels::native_q8_1_bytes(n_embd_));
-        ds_latq_ = bytes(kernels::native_q8_1_bytes(ds_rank_));
-        ds_gq_ = bytes(B * kernels::native_q8_1_bytes((int) std::max(hq, (size_t) ds_ff_)));
-        ds_approx_ = fbuf(B * (size_t) ds_screen_rows(n_unpadded_));
-        ds_hscr_ = (float*) bytes(ds_screen_scratch_bytes(n_unpadded_));
-        if (!ds_ring_ && scratch_) ds_load();
+        const bool is_last = end_ < 0 || end_ >= n_layer_;
+        if (is_last) {
+            ds_mix_ = fbuf(3 * n * E);
+            ds_k_ = fbuf(std::max(n, B) * kv);
+            ds_v_ = fbuf(std::max(n, B) * kv);
+            ds_x_ = fbuf(B * E);
+            ds_y_ = fbuf(B * E);
+            ds_q_ = fbuf(B * hq);
+            ds_att_ = fbuf(B * hq);
+            ds_g_ = fbuf(B * ds_ff_);
+            ds_u_ = fbuf(B * ds_ff_);
+            ds_h_ = fbuf(B * E);
+            ds_base_ = fbuf(B * V);
+            ds_z_ = fbuf(V);
+            ds_fy_ = fbuf(V);
+            ds_part_ = fbuf(ds_attend_floats(n_kv_));
+            ds_ctxh_ = fbuf(B * 3 * R);
+            ds_ctxf_ = fbuf(3 * R);
+            ds_in_ = fbuf(2 * R);
+            ds_sp_ = fbuf(3 * R);
+            ds_state_ = fbuf(R);
+            ds_lat_ = fbuf(R);
+            ds_frc_ = fbuf(E);
+            const auto bytes = [&](size_t sz) { return (void*) fbuf((sz + sizeof(float) - 1) / sizeof(float)); };
+            ds_yq_ = bytes(B * kernels::native_q8_1_bytes(n_embd_));
+            ds_hq_ = bytes(B * kernels::native_q8_1_bytes(n_embd_));
+            ds_latq_ = bytes(kernels::native_q8_1_bytes(ds_rank_));
+            ds_gq_ = bytes(B * kernels::native_q8_1_bytes((int) std::max(hq, (size_t) ds_ff_)));
+            ds_approx_ = fbuf(B * (size_t) ds_screen_rows(n_unpadded_));
+            ds_hscr_ = (float*) bytes(ds_screen_scratch_bytes(n_unpadded_));
+            if (!ds_ring_ && scratch_) ds_load();
+        }
     }
     if (!side_) {
         cudaStream_t s = nullptr;
@@ -2340,10 +2343,9 @@ size_t Inkling2::extra_bytes() const {
 }
 
 // On a layer split the next card goes on from these and r_: what crosses is the stream, the four blocks' starts the
-// mixes read and the loop's bank (64.5 KB a token at Inkling 2 Mini's width).  The drafter's taps after them are
-// read()'s groups' only: the drafter runs on one card.
+// mixes read, the loop's bank and the drafter's taps (ds_tap_).
 float* Inkling2::carried(int i) {
-    if (i >= kBlocks + 2) return ds_tap_ + (size_t) (i - kBlocks - 2) * rows_ * n_embd_;
+    if (i >= kBlocks + 2) return ds_tap_ ? ds_tap_ + (size_t) (i - kBlocks - 2) * rows_ * n_embd_ : nullptr;
     return i < kBlocks ? bl_[i] : i == kBlocks ? bank_ : bank_out_;
 }
 
