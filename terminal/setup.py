@@ -6337,7 +6337,7 @@ def build_engine_hip(gpu, llama, vision="none", portable=False) -> Path:
                  "-DSTRATA_Q6K_EXPERTS=ON", "-DCMAKE_HIP_ARCHITECTURES=" + ";".join(archs),
                  f"-DCMAKE_HIP_COMPILER={rocm_clang(root)}", f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root}",
                  "-DCMAKE_PREFIX_PATH=" + ";".join([str(root), *libs]),
-                 f"-DCMAKE_HIP_FLAGS=-isystem {root}/include --rocm-path={root} --rocm-device-lib-path={bitcode}",
+                 f'-DCMAKE_HIP_FLAGS=-isystem "{root}/include" --rocm-path="{root}" --rocm-device-lib-path="{bitcode}"',
                  f"-DSTRATA_PORTABLE={'ON' if portable else 'OFF'}",
                  *ggml_defs(llama), *isa_floor_defs(floor, ROOT / "build-hip", meta)], None, "")
     if stale_binary(ROOT / "build-hip" / EXE):            # #2054: no stamp for a binary of another version
@@ -6398,7 +6398,7 @@ def build_engine_hip_win(gpu, llama, portable=False) -> Path:
                  f"-DCMAKE_CXX_COMPILER={rocm}/lib/llvm/bin/clang++.exe",
                  f"-DCMAKE_HIP_COMPILER={rocm}/lib/llvm/bin/clang++.exe",
                  f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={rocm}", f"-DCMAKE_PREFIX_PATH={rocm}",
-                 f"-DCMAKE_HIP_FLAGS=--rocm-path={rocm} --rocm-device-lib-path={bitcode}",
+                 f'-DCMAKE_HIP_FLAGS=--rocm-path="{rocm}" --rocm-device-lib-path="{bitcode}"',
                  *ggml_defs(llama)], vcvars, "build-strata-hip-win.bat")
     if stale_binary(bdir / EXE):                       # #2054: no stamp for a binary of another source
         fail(f"the engine build finished without a new engine ({EXE} is version "
@@ -6474,7 +6474,7 @@ def build_vision_hip(eng: Path, stamp: Path, meta: dict, llama, vsrc, archs: lis
                     ["-DSTRATA_VISION_HIP=ON", "-DSTRATA_VISION_HIP_ARCHS=" + ";".join(archs),
                      "-DSTRATA_PORTABLE=OFF", f"-DCMAKE_HIP_COMPILER={rocm_clang(root)}",
                      f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root}", "-DCMAKE_PREFIX_PATH=" + ";".join([str(root), *libs]),
-                     f"-DCMAKE_HIP_FLAGS=-isystem {root}/include --rocm-path={root} --rocm-device-lib-path={bitcode}"], None, "")
+                     f'-DCMAKE_HIP_FLAGS=-isystem "{root}/include" --rocm-path="{root}" --rocm-device-lib-path="{bitcode}"'], None, "")
         shutil.copy2(ROOT / "build-vision-hip" / "bin" / HVEXE, eng / HVEXE)
     except SystemExit:
         raise
@@ -7520,6 +7520,14 @@ def forward_slash_defs(defs, win: bool | None = None) -> list:
     return [d.replace("\\", "/") if win and isinstance(d, str) and d.startswith("-D") else d for d in defs]
 
 
+def bat_arg(x) -> str:
+    """One argument of a command line in the generated build .bat.  An argument with a space is quoted; a quote inside it
+    becomes \\" so the program's argument parser keeps it (#7138: CMAKE_HIP_FLAGS quotes the ROCm paths, which hold the
+    install folder, so a folder named with a space reaches clang++ as one path)."""
+    s = str(x)
+    return '"' + s.replace('"', '\\"') + '"' if (" " in s or '"' in s) else s
+
+
 def cmake_build(src, bdir, target, defs, vcvars, bat_name):
     """`target`: one CMake target, or a list of them (one `--target` each: the Windows HIP engine builds `strata` and
     `strata-device` together, as tools/hip/build_windows.bat does)."""
@@ -7542,7 +7550,7 @@ def cmake_build(src, bdir, target, defs, vcvars, bat_name):
                  "install Visual Studio 2022 Build Tools (workload 'Desktop development with C++'), then run setup again; a ready-made engine "
                  "needs no compiler: `strata update` fetches it")
         bat = ROOT / bat_name
-        q = lambda c: " ".join(f'"{x}"' if " " in str(x) else str(x) for x in c)  # noqa: E731
+        q = lambda c: " ".join(bat_arg(x) for x in c)  # noqa: E731
         bat.write_bytes((f'@echo off\r\ncall "{vcvars}"{vcvars_toolset(vcvars)} >nul\r\n{q(conf)} || exit /b 1\r\n{q(build)} && exit /b 0\r\n'
                          f'echo   (the build stopped - trying it once more)\r\n{q(build)} || exit /b 1\r\n').encode("utf-8"))
         # bytes, not text: the \r\n is written here, and text mode on Windows would turn each one into \r\r\n (#1939)
@@ -10457,7 +10465,7 @@ def build_engine_poly_hip(gpu, llama, portable=False) -> Path:
                  "-DCMAKE_HIP_ARCHITECTURES=" + ";".join(archs),
                  f"-DCMAKE_HIP_COMPILER={rocm_clang(root)}", f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={root}",
                  "-DCMAKE_PREFIX_PATH=" + ";".join([str(root), *libs]),
-                 f"-DCMAKE_HIP_FLAGS=-isystem {root}/include --rocm-path={root} --rocm-device-lib-path={bitcode}",
+                 f'-DCMAKE_HIP_FLAGS=-isystem "{root}/include" --rocm-path="{root}" --rocm-device-lib-path="{bitcode}"',
                  *ggml_defs(llama)], None, "")
     shutil.copy2(ROOT / "build-poly-hip" / POLY_EXE, eng / POLY_EXE)
     stamp.write_text(json.dumps({"source": "local-hip", "backend": "hip", "version": source_version(),
@@ -10508,7 +10516,7 @@ def build_engine_poly_hip_win(gpu, llama, portable=False) -> Path:
                  f"-DCMAKE_CXX_COMPILER={rocm}/lib/llvm/bin/clang++.exe",
                  f"-DCMAKE_HIP_COMPILER={rocm}/lib/llvm/bin/clang++.exe",
                  f"-DCMAKE_HIP_COMPILER_ROCM_ROOT={rocm}", f"-DCMAKE_PREFIX_PATH={rocm}",
-                 f"-DCMAKE_HIP_FLAGS=--rocm-path={rocm} --rocm-device-lib-path={bitcode}",
+                 f'-DCMAKE_HIP_FLAGS=--rocm-path="{rocm}" --rocm-device-lib-path="{bitcode}"',
                  *ggml_defs(llama)], vcvars, "build-strata-poly-hip.bat")
     shutil.copy2(bdir / POLY_EXE, eng / POLY_EXE)
     # the DLLs, the GEMM kernels and the .kpack files rocBLAS finds beside its DLL come from the ready-made main
