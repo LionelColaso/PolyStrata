@@ -5595,7 +5595,7 @@ bool Engine::card_moe(int n) {
     const bool bell = bell_on(n);
     if (!(card_routes() || bell) || !d_slots_ || n * n_used_ > card_rows() || opt_.dump) return false;
 #if !defined(STRATA_GPU_METAL)
-    if (ecard_) return false;   // --expert-gpu: the host routes, and hands the second card its experts (moe())
+    if (ecard_ && !bell) return false;
 #endif
     const bool mirrored = !all_cached() && !bell;   // with the doorbell the misses are the host's, not the mirror's
     const auto far_of = [&](int il, int e) -> void* {
@@ -5657,12 +5657,12 @@ bool Engine::moe_card(Layer& L, int il, int n) {
     L.card = 1;
     const int rr = n * n_used_;
     const void* const* table = d_slots_ + (size_t) il * n_expert_;
-    [[maybe_unused]] const bool rings = bell_ && n == 1;
+    [[maybe_unused]] const bool rings = bell_ && n >= 1;
 #if !defined(STRATA_GPU_METAL)
-    if (rings) {   // the doorbell: the misses to the host, a token's place under --tail-skip's
+    if (rings) {   // the doorbell: the misses to the host / second card, a token's place under --tail-skip's
         if (!block_pass_) count_picks(d_ids_, rr, n_expert_, d_use_ + (size_t) il * n_expert_, st_);
         bell_ring(table, d_ids_, d_wts_, n_used_, opt_.tail_skip > 0 ? opt_.tail_skip : n_used_, il, xn_, h_x_, n_embd_,
-                  h_bell_, d_bell_seq_, st_);
+                  h_bell_, d_bell_seq_, st_, n);
         table = d_zslots_ + (size_t) il * n_expert_;
     } else if (!all_cached()) {   // card_far_: the experts it lacks, from the mirror into the staging buffer first
         far_plan(table, d_far_ + (size_t) il * n_expert_, d_ids_, rr, n_expert_, stage_, ahead_stride_, d_tab_,
@@ -5702,7 +5702,7 @@ bool Engine::moe_card(Layer& L, int il, int n) {
     if (moe_sum_later(n)) moe_left_ = true;
     else moe_sum(d_, d_wts_, fo_, n_embd_, n_used_, n, st_);
 #if !defined(STRATA_GPU_METAL)
-    if (rings) bell_add(h_bell_, d_bell_seq_, h_cpu_, fo_, n_embd_, st_);   // (bells(): no sum later then)
+    if (rings) bell_add(h_bell_, d_bell_seq_, h_cpu_, fo_, n * n_embd_, st_);   // (bells(): no sum later then)
 #endif
     return true;
 }
@@ -5712,7 +5712,8 @@ bool Engine::bell_on(int n) const {
     (void) n;
     return false;
 #else
-    return n == 1 && h_bell_ && !all_cached() && !card_far_ && !pool_ && !split_ && !block_pass_ && !opt_.dump;
+    return (n == 1 || (ecard_ && n >= 1 && n <= kCpuRows)) && h_bell_ && !all_cached() && !card_far_ &&
+           (!pool_ || ecard_) && !split_ && !block_pass_ && !opt_.dump;
 #endif
 }
 
@@ -5755,14 +5756,17 @@ void Engine::bell_serve() {
         if (r != bell_seen_) {
             std::atomic_thread_fence(std::memory_order_acquire);
             bell_seen_ = r;
+            bool async_ack = false;
             try {
-                bell_job();
+                async_ack = bell_job(r);
             } catch (...) {
                 bell_unwind();   // the card's waits end; what it adds is spoiled, and the call throws
                 throw;
             }
-            std::atomic_thread_fence(std::memory_order_release);
-            h_bell_->ack = r;
+            if (!async_ack) {
+                std::atomic_thread_fence(std::memory_order_release);
+                h_bell_->ack = r;
+            }
             moved = Clock::now();
             continue;
         }
@@ -5788,25 +5792,59 @@ void Engine::bell_unwind() {
 #endif
 }
 
-void Engine::bell_job() {
+bool Engine::bell_job(uint32_t seq) {
     const int il = h_bell_->layer, n = std::min<int>(h_bell_->n, kBellJobs);
+    const int rows = std::max(1, h_bell_->rows);
     const Layer& L = layers_[(size_t) il];
     CpuExpert host[kBellJobs];
+    int n_host = 0;
+#if !defined(STRATA_GPU_METAL)
+    ExpertCard::Job card2[kBellJobs];
+    int n_far = 0;
+#endif
     for (int j = 0; j < n; ++j) {
         const size_t e = (size_t) h_bell_->e[j];
+        const int row = h_bell_->row[j];
         const float w = L.h_s_down.empty() ? h_bell_->w[j] : h_bell_->w[j] * L.h_s_down[e];   // NVFP4's down scale
+#if !defined(STRATA_GPU_METAL)
+        if (const uint8_t* s = ecard_ ? ecard_->slot(il, (int) e) : nullptr) {
+            card2[n_far++] = {s, w, row, (int) e};
+            continue;
+        }
+#endif
         const float gs = L.h_s_gate.empty() ? 1.f : L.h_s_gate[e], us = L.h_s_up.empty() ? 1.f : L.h_s_up[e];
         if (const uint8_t* m = mirror(il, (int) e))
-            host[j] = {m, m + L.gu_bytes, m + L.gu2(), w, 0, gs, us};
+            host[n_host++] = {m, m + L.gu_bytes, m + L.gu2(), w, row, gs, us};
         else
-            host[j] = {L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes, w, 0, gs, us};
+            host[n_host++] = {L.exp_gate + e * L.gu_stride, L.exp_up + e * L.u_stride, L.exp_down + e * L.d_bytes, w,
+                              row, gs, us};
     }
+#if !defined(STRATA_GPU_METAL)
+    if (n_far > 0 && n_host == 0) {
+        ecard_->start(L, il, h_x_, rows, card2, n_far, clamp_exp_[(size_t) il], gelu_, situ_beta_, situ_lb_, h_cpu_,
+                      h_bell_, seq);
+        return true;
+    }
+    if (n_far > 0)
+        ecard_->start(L, il, h_x_, rows, card2, n_far, clamp_exp_[(size_t) il], gelu_, situ_beta_, situ_lb_);
+#else
+    (void) seq;
+#endif
     const Clock::time_point t0 = Clock::now();
-    cpu_experts(*workers_, host, n, 1, (int) L.gu_type, (int) L.u_type, (int) L.d_type, n_embd_, n_ff_exp_, h_x_,
-                clamp_exp_[(size_t) il], gelu_, h_cpu_, nullptr, nullptr, nullptr, situ_beta_, situ_lb_);
-    stats_.cpu_ms += ms_since(t0);
-    stats_.cpu_experts += n;
-    stats_.gpu_experts -= n;   // run() counted every pick of the token as the card's
+    if (n_host > 0) {
+        if (pool_) pool_take(L, il, host, n_host);
+        cpu_experts(*workers_, host, n_host, rows, (int) L.gu_type, (int) L.u_type, (int) L.d_type, n_embd_, n_ff_exp_,
+                    h_x_, clamp_exp_[(size_t) il], gelu_, h_cpu_, nullptr, nullptr, nullptr, situ_beta_, situ_lb_);
+        stats_.cpu_ms += ms_since(t0);
+        stats_.cpu_experts += n_host;
+        stats_.gpu_experts -= n_host;   // run() counted every pick of the token as the card's
+    } else {
+        std::memset(h_cpu_, 0, (size_t) rows * n_embd_ * sizeof(float));
+    }
+#if !defined(STRATA_GPU_METAL)
+    if (n_far > 0) ecard_->finish_into(h_cpu_);
+#endif
+    return false;
 }
 
 // m experts from the mapped file into the staging buffer: gate and up of each back to back from the start, the
