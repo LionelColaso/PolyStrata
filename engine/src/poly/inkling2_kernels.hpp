@@ -78,6 +78,12 @@ void ink_control3_gate(const float* const* cur, const float* const* msg, const f
 void ink_gate_set(const float* const* cur, const float* const* msg, const float* const* gain,
                   const float* const* forget, float* const* out, int count, size_t n, void* stream);
 
+/// A prompt's controller after its down product: gain = ch gain_w^T and forget = ch forget_w^T (rank values in, n_embd
+/// out, F32 or with bf16 BF16 matrices), then ink_gate() of them, in one launch.  Each product is one fmaf after the
+/// other in the rank's order: the bits of lin_pair()'s hipblasSgemm on gfx1201 (inkling2_test: ctrl_up_gate).  False,
+/// with nothing launched, for a rank other than 64.  out may be cur.
+bool ink_ctrl_up_gate(const float* cur, const float* msg, const float* ch, const void* gain_w, const void* forget_w,
+                      float* out, int n_embd, int rank, int rows, void* stream, bool bf16 = false);
 /// out = cur - tanh(forget) * cur + tanh(gain) * msg, n values.  out may be cur.
 void ink_gate(const float* cur, const float* msg, const float* gain, const float* forget, float* out, size_t n,
               void* stream);

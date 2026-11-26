@@ -3530,6 +3530,22 @@ void gemm_f32(void* blas, const float* w, const float* x, float* y, int n_in, in
     if (groups == 1 && n_out <= 8 * SMALL_OUT) {
         cudaStream_t stream = nullptr;
         blas_ck(cublasGetStream(h, &stream), "cublasGetStream");
+#if defined(STRATA_USE_HIP)
+        // RDNA: the tiles by the size of the product.  The shapes above left an RX 9070 XT's 64 multiprocessors few
+        // blocks: 1,024 tokens of Inkling 2 Mini's 4,608 values into its controllers' 64 outputs took 243 us with
+        // <16, 64, 2, 4>, 156 with <32, 32, 2, 2>; its router (2,304 into 128) 146 us with <32, 64, 4, 4>, 120 with
+        // <64, 64, 4, 4>.  Every tile sums an output in the same order: the same bits.
+        if (n_out > 2 * SMALL_OUT || small_waves(rows, n_out) > 2) {
+            const long long outs = (long long) rows * n_out;
+            if (outs <= 65536)
+                gemm_tile<32, 32, 2, 2>(w, x, y, n_in, n_out, rows, stream);
+            else if (outs <= 262144 || n_out <= 64)
+                gemm_tile<64, 64, 4, 4>(w, x, y, n_in, n_out, rows, stream);
+            else
+                gemm_tile<64, 128, 4, 4>(w, x, y, n_in, n_out, rows, stream);
+            return;
+        }
+#endif
         if (n_out > 2 * SMALL_OUT)
             gemm_tile<32, 64, 4, 4>(w, x, y, n_in, n_out, rows, stream);
         else if (small_waves(rows, n_out) > 2)

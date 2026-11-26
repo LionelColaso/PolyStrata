@@ -3595,6 +3595,64 @@ void ink_gate_set(const float* const* cur, const float* const* msg, const float*
     launched("ink_gate");
 }
 
+// ink_ctrl_up_gate(): a prompt's gain and forget products of a controller and its gate in one launch.  A thread has
+// one output (value o of a row) and its two weight rows in registers, and goes through kUpTokens tokens whose ch rows
+// the block holds.  Each product is one fmaf after the other over the rank in its order from 0, as hipblasSgemm's
+// kernel for these shapes does it (the same bits on gfx1201 under ROCm 7.2 and 10.2; inkling2_test's ctrl_up_gate
+// checks it against lin()'s launches), then ink_gate_kernel's arithmetic on them.
+constexpr int kUpThreads = 256, kUpTokens = 32, kUpRank = 64;
+
+template <typename W>
+__global__ void __launch_bounds__(kUpThreads) ink_ctrl_up_gate_kernel(const float* cur, const float* msg,
+                                                                      const float* __restrict__ ch,
+                                                                      const W* __restrict__ gw,
+                                                                      const W* __restrict__ fw, float* out,
+                                                                      int n_embd, int rows) {
+    __shared__ __align__(16) float sc[kUpTokens][kUpRank];
+    const int o = blockIdx.x * kUpThreads + threadIdx.x, t0 = blockIdx.y * kUpTokens;
+    const int nt = min(kUpTokens, rows - t0);
+    for (int i = threadIdx.x; i < kUpTokens * kUpRank; i += kUpThreads) {
+        const int t = i / kUpRank;
+        sc[t][i % kUpRank] = t < nt ? ch[size_t(t0 + t) * kUpRank + i % kUpRank] : 0.0f;
+    }
+    __syncthreads();
+    if (o >= n_embd) return;
+    float g[kUpRank], f[kUpRank];
+#pragma unroll
+    for (int k = 0; k < kUpRank; ++k) {
+        g[k] = wval(gw, size_t(o) * kUpRank + k);
+        f[k] = wval(fw, size_t(o) * kUpRank + k);
+    }
+    for (int t = 0; t < nt; ++t) {
+        float a = 0.0f, b = 0.0f;
+#pragma unroll
+        for (int k = 0; k < kUpRank; k += 4) {
+            const float4 x = *reinterpret_cast<const float4*>(&sc[t][k]);
+            a = fmaf(x.x, g[k], a), b = fmaf(x.x, f[k], b);
+            a = fmaf(x.y, g[k + 1], a), b = fmaf(x.y, f[k + 1], b);
+            a = fmaf(x.z, g[k + 2], a), b = fmaf(x.z, f[k + 2], b);
+            a = fmaf(x.w, g[k + 3], a), b = fmaf(x.w, f[k + 3], b);
+        }
+        const size_t i = size_t(t0 + t) * n_embd + o;
+        const float c = cur[i];
+        out[i] = c - tanhf(b) * c + tanhf(a) * msg[i];
+    }
+}
+
+bool ink_ctrl_up_gate(const float* cur, const float* msg, const float* ch, const void* gain, const void* forget,
+                      float* out, int n_embd, int rank, int rows, void* stream, bool bf16) {
+    if (rank != kUpRank || rows <= 0) return false;
+    const dim3 g(grid((size_t) n_embd, kUpThreads), grid((size_t) rows, kUpTokens));
+    if (bf16)
+        ink_ctrl_up_gate_kernel<uint16_t><<<g, kUpThreads, 0, cs(stream)>>>(
+            cur, msg, ch, (const uint16_t*) gain, (const uint16_t*) forget, out, n_embd, rows);
+    else
+        ink_ctrl_up_gate_kernel<float><<<g, kUpThreads, 0, cs(stream)>>>(cur, msg, ch, (const float*) gain,
+                                                                          (const float*) forget, out, n_embd, rows);
+    launched("ink_ctrl_up_gate");
+    return true;
+}
+
 void ink_gate(const float* cur, const float* msg, const float* gain, const float* forget, float* out, size_t n,
               void* stream) {
     ink_gate_set(&cur, &msg, &gain, &forget, &out, 1, n, stream);

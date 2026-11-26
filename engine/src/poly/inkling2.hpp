@@ -143,6 +143,9 @@ private:
     /// The stream waits for what side_ has.
     void join();
     void control(const float* cur, const float* msg, const Ctrl& c, float* out, int n);
+#if defined(STRATA_USE_HIP)
+    bool up_gate_ok(const Ctrl& c, int n) const;
+#endif
     bool control3(const float* const* cur, float* const* msg, const Ctrl* c, float* const* out, int n);
     bool project(const Block& B, const float* const* x, int n, bool quantized = false, bool* extras = nullptr);
     bool control_ffn(const float* msg, const Ctrl& c, const Block& B, int rows);

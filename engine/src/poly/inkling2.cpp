@@ -1136,10 +1136,29 @@ void Inkling2::control(const float* cur, const float* msg, const Ctrl& c, float*
         const int outs[2] = {n_embd_, n_embd_};
         gemv_set(w, x, y, outs, 2, rank_, n, st_);
     } else {
+#if defined(STRATA_USE_HIP)
+        // a prompt's: lin_pair()'s two hipblasSgemm calls and the gate in one launch, the same bits
+        if (up_gate_ok(c, n) && ink_ctrl_up_gate(cur, msg, ch_, c.gain.p, c.forget.p, out, n_embd_, rank_, n, st_,
+                                                 c.gain.type == kTypeBF16))
+            return;
+#endif
         lin_pair(c.gain, c.forget, ch_, gain_, forget_, n, nullptr);
     }
     ink_gate(cur, msg, gain_, forget_, out, (size_t) n * n_embd_, st_);
 }
+
+#if defined(STRATA_USE_HIP)
+// Where lin_pair() takes a controller's gain and forget through gemm_f32()'s hipblasSgemm (a prompt batch of F32, or
+// of BF16 widened into wf_; more than the 256 outputs gemm_f32() keeps for its own kernels), whose bits
+// ink_ctrl_up_gate() has.
+bool Inkling2::up_gate_ok(const Ctrl& c, int n) const {
+    const auto blas = [&](const Dev& d) {
+        return d.scale == 1.0f && d.n_in == rank_ && d.n_out == n_embd_ &&
+               (d.type == kTypeF32 || (d.type == kTypeBF16 && wf_ && (size_t) d.n_in * d.n_out <= bf16_max_));
+    };
+    return n >= kStageRows && n_embd_ > 256 && c.gain.type == c.forget.type && blas(c.gain) && blas(c.forget);
+}
+#endif
 
 // A later pass's FFN controller for one token (control() on mixf_), its gate in the launch of the experts' input
 // norm and quantization (native_add_rms_norm_q8_1()'s): the same bytes.  False, with nothing launched, where
