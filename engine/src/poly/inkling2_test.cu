@@ -2037,9 +2037,10 @@ void case_cuda_win() {
 // the reference only.
 void case_ctrl_up_gate() {
     void* blas = blas_create(stream());
+    constexpr std::pair<int, int> cases[] = {{32, kEmbd}, {33, kEmbd}, {100, kEmbd}, {777, kEmbd},
+                                             {1024, kEmbd}, {2048, kEmbd}, {3001, kEmbd}, {100, kEmbd + 32}};
     for (const bool bf : {false, true})
-        for (const auto [rows, embd] : {std::pair{32, kEmbd}, {33, kEmbd}, {100, kEmbd}, {777, kEmbd}, {1024, kEmbd},
-                                        {2048, kEmbd}, {3001, kEmbd}, {100, kEmbd + 32}}) {
+        for (const auto [rows, embd] : cases) {
             const auto cur = randv((size_t) rows * embd, 1.0f), msg = randv((size_t) rows * embd, 0.5f),
                        chv = randv((size_t) rows * kRank, 1.0f);
             auto gain = randv((size_t) embd * kRank, 0.1f), forget = randv((size_t) embd * kRank, 0.1f);
