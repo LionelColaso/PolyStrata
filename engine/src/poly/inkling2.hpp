@@ -57,6 +57,11 @@ protected:
     int whole_first_layers() const override { return 4; }
     // its kernels in inkling2.cu wait for the launch before them in pdl_wait()
     bool whole_pdl() const override { return true; }
+#if defined(STRATA_USE_HIP)
+    // On AMD a token's layers recorded one by one (some experts outside VRAM) took longer than the launches alone:
+    // RX 9070 XT, IQ4_NL, 41.4 against 44.2 tokens/s after 302.  The whole pass's recording is kept.
+    bool layer_records() const override { return false; }
+#endif
     int head_key(int il, int n) const override;
     int tail_key(int il, int n) const override;
     // step()'s rows in one head: the products, mixes, norms, controllers and router for all of them, and what reads or

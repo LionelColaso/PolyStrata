@@ -1639,9 +1639,11 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
     // an output, the card's memory idle: in a whole pass's recording they run beside the Q8_0 ones, a branch off
     // the stream that it joins after them.  gemv_bf16() is lin()'s launch for them.  Not on Metal: a recording there
     // is the capturing stream's alone, so the branch's launches ran once as it was made and never in its replays (the
-    // sink and the taps stayed the recording token's), and each event committed a command buffer.
+    // sink and the taps stayed the recording token's), and each event committed a command buffer.  Not on HIP: there
+    // the branch and its join inside the recording made a token slower, not faster (UD-Q2_K_XL's BF16 sink and taps,
+    // 256 tokens after 302: RX 9070 XT 60.0 tokens/s with it, 83.7 without; RX 7800 XT 38.0 and 65.7).
     const auto plain_bf16 = [](const Dev& d) { return !d.p || (d.type == kTypeBF16 && d.scale == 1.0f); };
-#if defined(STRATA_GPU_METAL)
+#if defined(STRATA_GPU_METAL) || defined(STRATA_USE_HIP)
     constexpr bool kBranch = false;
 #else
     constexpr bool kBranch = true;
