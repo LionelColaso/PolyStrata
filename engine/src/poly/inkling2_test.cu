@@ -904,6 +904,18 @@ void case_norms() {
     same_bits("ink_gate_norm_q8 = ink_gate(): the gate", out.get(), out2.get());
     same_bits("ink_gate_norm_q8 = native_add_rms_norm_q8_1(): norm", y.get(), y2.get());
     same_bits("ink_gate_norm_q8 = native_add_rms_norm_q8_1(): q8_1", q.get(), q2.get());
+    // ExpertCard's scratch sizes Q8_1 rows by native_q8_1_bytes(n) * count (kSlots = 32 > MAX_NCOLS = 8)
+    {
+        const int ff = 1152, kSlots = 32;
+        const auto h = randv((size_t) kSlots * ff, 1.0f);
+        Dev<float> dh(h);
+        const size_t row_b = nk::native_q8_1_bytes(ff);
+        Dev<uint8_t> dq(row_b * (size_t) kSlots), dq1(row_b * (size_t) kSlots);
+        nk::native_quantize_q8_1(dh, dq, ff, kSlots, stream());
+        for (int r = 0; r < kSlots; ++r)
+            nk::native_quantize_q8_1(dh + (size_t) r * ff, dq1 + (size_t) r * row_b, ff, 1, stream());
+        same_bits("native_quantize_q8_1 kSlots rows = per-row", dq.get(), dq1.get());
+    }
 }
 
 // The loop controllers: ink_cat_norm(_set)(), ink_ctrl_down() (F32: against ink_cat_norm_set() + gemv_set(), the
