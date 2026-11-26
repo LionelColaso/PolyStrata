@@ -9807,10 +9807,15 @@ DISPLAY_RESERVE_MIB = 1500     # #779: the tip for an NVIDIA card that also driv
 DESKTOP_RESERVE_MIB = 3072     # #560 #516: what kept a KDE/Wayland desktop alive beside a full expert cache
 
 
-def linux_desktop(env=None) -> bool:
-    """A graphical session on Linux (Wayland or X)."""
+def linux_desktop(env=None, release=None) -> bool:
+    """A graphical session on Linux (Wayland or X).  Not under WSL (WSL_DISTRO_NAME, or is_wsl()'s Microsoft kernel release):
+    WSLg sets DISPLAY there, but the desktop is Windows', which pages VRAM out instead (no #560 #516 OOM)."""
     env = os.environ if env is None else env
-    return sys.platform.startswith("linux") and bool(env.get("WAYLAND_DISPLAY") or env.get("DISPLAY"))
+    if not (sys.platform.startswith("linux") and bool(env.get("WAYLAND_DISPLAY") or env.get("DISPLAY"))):
+        return False
+    if env.get("WSL_DISTRO_NAME"):
+        return False
+    return not (is_wsl() if release is None else "microsoft" in str(release).lower())
 
 
 def desktop_reserve_note() -> list[str]:
