@@ -37,10 +37,10 @@ ExpertCard::ExpertCard(int device, int n_layer, int n_expert, int n_embd, int n_
     stream_ = s;
     const size_t ff = (size_t) n_ff, row = (size_t) n_embd;
     ck(cudaMalloc((void**) &xf_, (size_t) kCpuRows * row * sizeof(float)), "--expert-gpu scratch");
-    ck(cudaMalloc(&xq_, kernels::native_q8_1_bytes(n_embd, kCpuRows)), "--expert-gpu scratch");
+    ck(cudaMalloc(&xq_, kernels::native_q8_1_bytes(n_embd) * (size_t) kCpuRows), "--expert-gpu scratch");
     ck(cudaMalloc((void**) &g_, (size_t) kSlots * 2 * ff * sizeof(float)), "--expert-gpu scratch");
     ck(cudaMalloc((void**) &h_, (size_t) kSlots * ff * sizeof(float)), "--expert-gpu scratch");
-    ck(cudaMalloc(&q8_, kernels::native_q8_1_bytes(n_ff, kSlots)), "--expert-gpu scratch");
+    ck(cudaMalloc(&q8_, kernels::native_q8_1_bytes(n_ff) * (size_t) kSlots), "--expert-gpu scratch");
     ck(cudaMalloc((void**) &d_, (size_t) kSumRows * row * sizeof(float)), "--expert-gpu scratch");
     ck(cudaMalloc((void**) &acc_, (size_t) kCpuRows * row * sizeof(float)), "--expert-gpu scratch");
     ck(cudaMallocHost((void**) &out_, (size_t) kCpuRows * row * sizeof(float)), "--expert-gpu scratch");
