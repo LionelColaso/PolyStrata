@@ -497,13 +497,32 @@ def configured_pin_dir(cfg: dict) -> str | None:
     return None
 
 
-def inkling_template_kwargs(kwargs: dict) -> dict:
+_INKLING_Q2_RE = re.compile(r"(?:^|[^a-z0-9])q2(?:[_\-.]|$)", re.IGNORECASE)
+
+
+def inkling_default_effort(model_name: str | None = None, model_path: str | None = None):
+    """Default reasoning_effort for Inkling 2 Mini when neither client nor config sets one:
+    "low" (0.2) for Q2 quantizations (e.g. UD-Q2_K_XL) and 0.4 for Q3/Q4 and other sizes."""
+    for text in (model_name, Path(str(model_path)).name if model_path else ""):
+        if text and _INKLING_Q2_RE.search(str(text)):
+            return "low"
+    return 0.4
+
+
+def inkling_template_kwargs(kwargs: dict, default=0.4) -> dict:
     """Inkling 2's template has one switch, reasoning_effort (a name or a number from 0 to 0.99), written in a system
-    message ahead of the conversation; an effort it does not know would stop the render.  Thinking off is "none"."""
+    message ahead of the conversation; an effort it does not know would stop the render.  Thinking off is "none".
+    When omitted, defaults to `default` (0.4 for Q3/Q4 and others, "low" / 0.2 for Q2); "medium" maps to 0.4."""
     effort = kwargs.get("reasoning_effort")
     known = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
-    level = "none" if kwargs.get("enable_thinking") is False else \
-        effort if effort in known or isinstance(effort, (int, float)) else "high"
+    if kwargs.get("enable_thinking") is False:
+        level = "none"
+    elif effort == "medium":
+        level = 0.4
+    elif effort in known or (isinstance(effort, (int, float)) and not isinstance(effort, bool)):
+        level = effort
+    else:
+        level = default
     rest = {k: v for k, v in kwargs.items() if k not in ("reasoning_effort", "enable_thinking")}
     return {**rest, "reasoning_effort": level}
 
@@ -5725,6 +5744,10 @@ class Service:
         effort = self.shared.get("reasoning_effort")
         return effort if effort is not None else self.config_effort
 
+    def inkling_default_effort(self):
+        """Default Inkling 2 Mini reasoning_effort when neither request nor config sets one."""
+        return inkling_default_effort(self.model, getattr(self.engine, "model_path", None))
+
     def with_shared(self, req: dict, api: str) -> dict:
         """The request with the shared thinking level and max tokens filled in where it has none of its own."""
         s = self.shared
@@ -6015,7 +6038,8 @@ class Service:
         if self.openai_tools and tools:   # their templates read a tool as OpenAI sends it (_read_tokenizer())
             tools = [{"type": "function", "function": t} for t in tools]
         if self.call_format == "inkling":
-            prompt = self.template.render(messages, tools=tools, **inkling_template_kwargs(kwargs))
+            prompt = self.template.render(messages, tools=tools,
+                                          **inkling_template_kwargs(kwargs, default=self.inkling_default_effort()))
             # at effort 0 the model still opens a thinking block now and then: a reply that must not think starts
             # in its text block (the parser is told: _read_tokenizer()'s text_open_ids)
             return prompt + INK_TEXT_OPEN if off else prompt
@@ -6345,7 +6369,7 @@ class Service:
         kw = ({k: v for k, v in kwargs.items() if k not in ("reasoning_effort", "enable_thinking")}
               if self.effort_end and (off or effort not in (None, "", "xhigh", "high")) else dict(kwargs))
         if self.call_format == "inkling":
-            kw = inkling_template_kwargs(kwargs)
+            kw = inkling_template_kwargs(kwargs, default=self.inkling_default_effort())
         elif self.hy4:
             kw = hy4_dialect.template_kwargs(kwargs)
         else:
@@ -10426,7 +10450,7 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
         raise SystemExit(f"[strata] config \"prevent_sleep\" must be true or false, not {cfg['prevent_sleep']!r}")
     from serve.keepawake import KeepAwake
     svc.keep_awake = KeepAwake.create(cfg.get("prevent_sleep") is True)      # #1727: opt-in, Windows only
-    if svc.config_effort:                               # #1641: the thinking level of requests that name none
+    if svc.config_effort is not None:                   # #1641: the thinking level of requests that name none
         print(f"[strata] thinking level: {svc.config_effort} (reasoning_effort in the config; a request, or the "
               "settings shared with other apps, can set its own)", flush=True)
     if svc.aliases:

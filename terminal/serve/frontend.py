@@ -160,7 +160,7 @@ EFFORT = {"none": None, "off": None, "minimal": None, "disabled": None, "false":
 
 _EFFORT_QWEN = dict(EFFORT)
 _EFFORT_INKLING = {"none": None, "off": None, "disabled": None, "false": None,
-                   "minimal": "minimal", "low": "low", "medium": "medium", "high": "high",
+                   "minimal": "minimal", "low": "low", "medium": 0.4, "high": "high",
                    "xhigh": "xhigh", "max": "max", "maximum": "max"}
 _FAMILY: str | None = None
 

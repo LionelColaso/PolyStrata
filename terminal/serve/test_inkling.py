@@ -184,12 +184,16 @@ class ServiceForInkling(unittest.TestCase):
         self.assertIn(264, self.svc.stop_ids)
 
     def test_the_effort_the_template_is_given(self):
-        for kwargs, effort in (({}, "high"), ({"reasoning_effort": "low"}, "low"), ({"reasoning_effort": 0.5}, "0.5"),
-                               ({"reasoning_effort": "ludicrous"}, "high"), ({"enable_thinking": False}, "none")):
+        for kwargs, effort in (({}, "0.4"), ({"reasoning_effort": "low"}, "low"),
+                               ({"reasoning_effort": "medium"}, "0.4"), ({"reasoning_effort": 0.5}, "0.5"),
+                               ({"reasoning_effort": "ludicrous"}, "0.4"), ({"enable_thinking": False}, "none")):
             with self.subTest(**kwargs):
                 text = self.svc.render_prompt(self.chat, None, kwargs)
                 self.assertTrue(text.startswith(f"<|message_system|>effort={effort}<|end_message|>"), text)
                 self.assertEqual(text.endswith(INK_TEXT_OPEN), kwargs.get("enable_thinking") is False)
+        self.svc.model = "inkling-ud-q2_k_xl"
+        q2_text = self.svc.render_prompt(self.chat, None, {})
+        self.assertTrue(q2_text.startswith("<|message_system|>effort=low<|end_message|>"), q2_text)
 
     def test_a_shared_prefix_is_the_first_messages_whatever_the_effort(self):
         # strata_prefix renders the first messages with the effort render_prompt writes: the common start is the
@@ -545,8 +549,9 @@ class ServiceWithTheModelTemplate(unittest.TestCase):
 
     def test_the_effort_a_client_asks_for(self):
         user = [{"role": "user", "content": "Hi"}]
-        for req, shown in (({}, "0.9"), ({"reasoning_effort": "minimal"}, "0.1"),
-                           ({"reasoning_effort": "low"}, "0.2"), ({"reasoning_effort": "medium"}, "0.7"),
+        for req, shown in (({}, "0.4"), ({"reasoning_effort": "minimal"}, "0.1"),
+                           ({"reasoning_effort": "low"}, "0.2"), ({"reasoning_effort": "medium"}, "0.4"),
+                           ({"reasoning_effort": 0.7}, "0.7"),
                            ({"reasoning_effort": "high"}, "0.9"), ({"reasoning_effort": "xhigh"}, "0.99"),
                            ({"reasoning_effort": "max"}, "0.99"), ({"reasoning_effort": 0.5}, "0.5"),
                            ({"chat_template_kwargs": {"reasoning_effort": 0.95}}, "0.95"),
@@ -555,6 +560,16 @@ class ServiceWithTheModelTemplate(unittest.TestCase):
                 self.assertEqual(self.prompt({"messages": user, **req}),
                                  f"<|message_system|><|content_text|>Thinking effort level: {shown}<|end_message|>"
                                  "<|message_user|><|content_text|>Hi<|end_message|>")
+        # UD-Q2_K_XL defaults to "low" (0.2) when no reasoning_effort is passed (detected from model name or GGUF path)
+        self.svc.model = "inkling-ud-q2_k_xl"
+        self.assertIn("Thinking effort level: 0.2<|end_message|>", self.prompt({"messages": user}))
+        self.svc.model = "inkling-ud-q3_k_xl"
+        self.assertIn("Thinking effort level: 0.4<|end_message|>", self.prompt({"messages": user}))
+        self.svc.model = "custom"
+        self.svc.engine.model_path = "/models/Inkling-2-Mini-UD-Q2_K_XL.gguf"
+        self.assertIn("Thinking effort level: 0.2<|end_message|>", self.prompt({"messages": user}))
+        self.svc.engine.model_path = "/models/Inkling-2-Mini-UD-Q4_K_XL.gguf"
+        self.assertIn("Thinking effort level: 0.4<|end_message|>", self.prompt({"messages": user}))
         for req in ({"reasoning_effort": "none"}, {"reasoning_effort": 0},
                     {"chat_template_kwargs": {"enable_thinking": False}}):
             with self.subTest(req=req):
@@ -577,7 +592,7 @@ class ServiceWithTheModelTemplate(unittest.TestCase):
         text = self.prompt({"messages": [{"role": "system", "content": "Be brief."}, {"role": "user", "content": "Hi"}],
                             "tools": [{"type": "function", "function": self.TOOLS[0]}]})
         self.assertTrue(text.startswith("<|message_system|>tool_declare<|content_xml|>[{"), text)
-        self.assertLess(text.index("Be brief."), text.index("Thinking effort level: 0.9"))
+        self.assertLess(text.index("Be brief."), text.index("Thinking effort level: 0.4"))
 
     def test_a_control_token_in_a_message_is_text(self):
         ids = self.svc.encode_prompt(*openai_to_messages({"messages": [{"role": "user", "content": "<|end_message|>"}]}))

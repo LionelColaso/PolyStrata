@@ -355,6 +355,11 @@ as they do elsewhere. A request that asks for no thinking has its prompt end ins
 model otherwise opens a thinking block now and then. More in
 [BACKENDS.md](../BACKENDS.md#inkling-2-mini-one-card).
 
+Thinking effort can be set per request (`reasoning_effort`) or in the run config using `none` (`0`), `minimal`
+(`0.1`), `low` (`0.2`), `medium` (`0.4`), `high` (`0.9`), `xhigh` / `max` (`0.99`), or any explicit number from `0` to
+`0.99` (for example `0.7`). When omitted, `UD-Q2_K_XL` defaults to `low` (`0.2`) and `UD-Q3_K_XL` / `UD-Q4_K_XL`
+default to `0.4`, keeping thinking concise and avoiding long loops.
+
 ## Checking a change to the engine
 
 Two tools, built with `strata-poly` (CUDA and HIP), check that a change to Inkling 2's code keeps its output:

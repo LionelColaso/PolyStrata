@@ -10229,6 +10229,14 @@ def poly_small_card(a, fam, paths) -> str | None:
     return "on"
 
 
+_INKLING_Q2_RE = re.compile(r"(?:^|[^a-z0-9])q2(?:[_\-.]|$)", re.IGNORECASE)
+
+
+def inkling_default_effort(model: str) -> str | float:
+    """Default reasoning_effort written into new Inkling 2 Mini configs: "low" (0.2) for Q2, 0.4 for Q3/Q4/others."""
+    return "low" if _INKLING_Q2_RE.search(str(model or "")) else 0.4
+
+
 def poly_saved_parallel(paths) -> int:
     """The saved "parallel" count of an earlier run config of this model, or 1."""
     for p in paths:
@@ -11074,6 +11082,8 @@ def poly_setup(a, family, gpu, hip, cuda_tk, multi, ram, data, elsewhere, port, 
         # on a Mac for a family that answers one request at a time there ("one_request": "mac").
         if draft_choice:
             done.pop("mtp", None)
+        if family == "inkling" and "reasoning_effort" not in done:
+            done["reasoning_effort"] = inkling_default_effort(model)
         parallel = int(done.get("parallel") or 1)
         if family == "inkling" and "--draft-model" in done.get("args", []) and (
                 parallel >= 2 or done.get("layer_split") or "--layer-split" in done.get("args", [])
