@@ -4507,6 +4507,7 @@ class Service:
             self.parser_cls = InklingOutputParser
             self.text_open_ids = tokenizer.encode(INK_TEXT_OPEN, parse_special=True)
             self._force_text = inkling_forced_call
+        self.set_family("hy4" if self.hy4 else "inkling" if self.call_format == "inkling" else None)
         openers = TURN_OPENERS_OF_PRE.get(pre) or TURN_OPENERS[self.call_format]
         # templates that read a tool as OpenAI sends it, {"type": "function", "function": {...}}: Gemma's and DeepSeek's
         # look inside it, and Laguna's prints it whole (vLLM and llama.cpp give it the request's tools as they are)
@@ -5179,7 +5180,9 @@ class Service:
         strata-<model>.shared-settings.json: from the last time this model ran."""
         self.shared_path = str(Path(config_path).with_suffix("")) + ".shared-settings.json"
         try:
-            self.shared = clean_shared_defaults(json.loads(Path(self.shared_path).read_text(encoding="utf-8")))
+            self.shared = clean_shared_defaults(
+                json.loads(Path(self.shared_path).read_text(encoding="utf-8")),
+                hy4=self.hy4, inkling=self.call_format == "inkling")
             if self.shared:
                 print("[strata] other apps use the settings: " +
                       ", ".join(f"{k}={v}" for k, v in self.shared.items()), flush=True)
@@ -5705,7 +5708,7 @@ class Service:
 
     def set_shared(self, defaults) -> dict:
         """The settings every client gets for what it leaves out; {} / None = clients use their own again."""
-        self.shared = clean_shared_defaults(defaults)
+        self.shared = clean_shared_defaults(defaults, hy4=self.hy4, inkling=self.call_format == "inkling")
         if self.shared_path:
             try:
                 if self.shared:
@@ -5716,28 +5719,29 @@ class Service:
                 print(f"[strata] could not save the shared settings: {e}", flush=True)
         return self.shared
 
-    def effort_default(self) -> str | None:
+    def effort_default(self):
         """The thinking level of a request that names none: the settings shared with apps first, then the config's
         "reasoning_effort" (#1641).  Every API reads it here (the Responses API did not: 0.1.44.1)."""
-        return self.shared.get("reasoning_effort") or self.config_effort
+        effort = self.shared.get("reasoning_effort")
+        return effort if effort is not None else self.config_effort
 
     def with_shared(self, req: dict, api: str) -> dict:
         """The request with the shared thinking level and max tokens filled in where it has none of its own."""
         s = self.shared
         effort = self.effort_default()
-        if not s and not effort:
+        if not s and effort is None:
             return req
         req = dict(req)
         if "max_tokens" in s and not req.get("max_tokens") and not req.get("max_completion_tokens"):
             req["max_tokens"] = s["max_tokens"]
-        if effort:
+        if effort is not None:
             if api == "openai":
                 ctk = req.get("chat_template_kwargs") if isinstance(req.get("chat_template_kwargs"), dict) else {}
                 if req.get("reasoning_effort") in (None, "") and not req.get("reasoning") and \
                         "enable_thinking" not in ctk and "reasoning_effort" not in ctk:
                     req["reasoning_effort"] = effort
             elif not req.get("thinking") and not req.get("output_config"):
-                if effort == "none":
+                if effort == "none" or effort == 0:
                     req["thinking"] = {"type": "disabled"}
                 else:                       # "thinking" too: under "on_request" an effort alone does not think
                     req["thinking"], req["output_config"] = {"type": "adaptive"}, {"effort": effort}
@@ -9753,7 +9757,10 @@ def model_settings(cfg: dict, overrides: dict | None = None) -> dict:
 
     effort = None
     if cfg.get("reasoning_effort") is not None:        # #1641: the thinking level of requests that name none
-        effort = clean_shared_defaults({"reasoning_effort": cfg["reasoning_effort"]}, hy4=hy4_kind.is_hy4(cfg)).get("reasoning_effort")
+        is_ink = ("inkling" in str(cfg.get("model_name") or "").lower()
+                  or any("inkling" in str(x).lower() for x in (cfg.get("args") or ())))
+        effort = clean_shared_defaults({"reasoning_effort": cfg["reasoning_effort"]},
+                                       hy4=hy4_kind.is_hy4(cfg), inkling=is_ink).get("reasoning_effort")
     mode = str(cfg.get("anthropic_thinking") or "model")   # #278: "on_request" = only when the request asks
     if mode not in ("model", "on_request"):
         raise ValueError(f"anthropic_thinking must be \"model\" or \"on_request\", not {mode!r}")
@@ -10371,7 +10378,7 @@ def _main(argv=None, *, lifecycle_event=None, interrupt_exit_code: int = 0) -> i
     svc.queue_timeout_s = float(queue_timeout) if queue_timeout is not None else None
     if a.engine == "strata":                            # the model card's sampling when nothing else is said (see MODEL_CARD_SAMPLING)
         svc.model_arch = cfg.get("arch") or "qwen4exp"
-        svc.set_family("hy4" if svc.hy4 else None)
+        svc.set_family("hy4" if svc.hy4 else "inkling" if svc.call_format == "inkling" else None)
         if svc.hy4:
             svc._force_text = hy4_dialect.force_text
         requested = cfg.get("parallel")

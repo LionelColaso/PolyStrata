@@ -27,9 +27,10 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT))
 
 import strata_tokenizer as ST  # noqa: E402
+from serve import frontend  # noqa: E402
 from serve.frontend import (FUNC_START, INK_TEXT_OPEN, ChatTemplate, InklingOutputParser,  # noqa: E402
                             anthropic_to_messages, forced_call, inkling_forced_call, openai_to_messages)
-from serve.server import ByteTokenizer, MockEngine, Service, StrataEngine  # noqa: E402
+from serve.server import ByteTokenizer, MockEngine, Service, StrataEngine, clean_shared_defaults  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 GOLDEN = json.loads((FIXTURES / "inkling2_golden.json").read_text(encoding="utf-8"))
@@ -168,6 +169,7 @@ TEMPLATE = ('{{- "<|message_system|>effort=" ~ reasoning_effort ~ "<|end_message
 
 class ServiceForInkling(unittest.TestCase):
     def setUp(self):
+        self.addCleanup(frontend.use_family, None)
         self.tok = InklingTokens()
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "chat_template.jinja"
@@ -530,6 +532,7 @@ class ServiceWithTheModelTemplate(unittest.TestCase):
     TOOLS = [{"name": "get_weather", "parameters": {"properties": {"city": {"type": "string"}}}}]
 
     def setUp(self):
+        self.addCleanup(frontend.use_family, None)
         self.tok = FullInklingTokens()
         self.svc = Service(MockEngine(self.tok, "hi"), self.tok, model_template())
 
@@ -542,17 +545,31 @@ class ServiceWithTheModelTemplate(unittest.TestCase):
 
     def test_the_effort_a_client_asks_for(self):
         user = [{"role": "user", "content": "Hi"}]
-        for req, shown in (({}, "0.9"), ({"reasoning_effort": "low"}, "0.2"), ({"reasoning_effort": "medium"}, "0.7"),
-                           ({"reasoning_effort": "xhigh"}, "0.99")):
+        for req, shown in (({}, "0.9"), ({"reasoning_effort": "minimal"}, "0.1"),
+                           ({"reasoning_effort": "low"}, "0.2"), ({"reasoning_effort": "medium"}, "0.7"),
+                           ({"reasoning_effort": "high"}, "0.9"), ({"reasoning_effort": "xhigh"}, "0.99"),
+                           ({"reasoning_effort": "max"}, "0.99"), ({"reasoning_effort": 0.5}, "0.5"),
+                           ({"chat_template_kwargs": {"reasoning_effort": 0.95}}, "0.95"),
+                           ({"reasoning": {"effort": "minimal"}}, "0.1")):
             with self.subTest(req=req):
                 self.assertEqual(self.prompt({"messages": user, **req}),
                                  f"<|message_system|><|content_text|>Thinking effort level: {shown}<|end_message|>"
                                  "<|message_user|><|content_text|>Hi<|end_message|>")
-        for req in ({"reasoning_effort": "none"}, {"chat_template_kwargs": {"enable_thinking": False}}):
+        for req in ({"reasoning_effort": "none"}, {"reasoning_effort": 0},
+                    {"chat_template_kwargs": {"enable_thinking": False}}):
             with self.subTest(req=req):
                 off = self.prompt({"messages": user, **req})
                 self.assertEqual(off, "<|message_system|><|content_text|>Thinking effort level: 0<|end_message|>"
                                       "<|message_user|><|content_text|>Hi<|end_message|>" + INK_TEXT_OPEN)
+        for bad in (1.5, -0.1, "ludicrous"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                openai_to_messages({"messages": user, "reasoning_effort": bad})
+        self.assertEqual(clean_shared_defaults({"reasoning_effort": "minimal"}, inkling=True),
+                         {"reasoning_effort": "minimal"})
+        self.assertEqual(clean_shared_defaults({"reasoning_effort": 0.15}, inkling=True),
+                         {"reasoning_effort": 0.15})
+        with self.assertRaises(ValueError):
+            clean_shared_defaults({"reasoning_effort": 1.5}, inkling=True)
         messages, tools, kwargs = anthropic_to_messages({"messages": user, "thinking": {"type": "disabled"}})
         self.assertIn("Thinking effort level: 0<", self.svc.render_prompt(messages, tools, kwargs))
 

@@ -359,7 +359,7 @@ def load_shared_settings(path, warn=print) -> dict:
     return out
 
 
-def clean_shared_defaults(d, hy4: bool = False) -> dict:
+def clean_shared_defaults(d, hy4: bool = False, inkling: bool = False) -> dict:
     """The settings other apps get (POST /settings): only known keys, each checked; ValueError names a bad one."""
     if d is None:
         return {}
@@ -371,7 +371,13 @@ def clean_shared_defaults(d, hy4: bool = False) -> dict:
             continue
         number = isinstance(value, (int, float)) and not isinstance(value, bool)
         if key == "reasoning_effort":
-            if value not in ("none", "low", "medium", "high") + (("max",) if hy4 else ()):    # Hy4's template also has max
+            if inkling:
+                if number:
+                    if not (value == value and 0 <= value <= 0.99):
+                        raise ValueError("reasoning_effort: none, minimal, low, medium, high, xhigh, max or 0..0.99")
+                elif value not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+                    raise ValueError("reasoning_effort: none, minimal, low, medium, high, xhigh, max or 0..0.99")
+            elif value not in ("none", "low", "medium", "high") + (("max",) if hy4 else ()):    # Hy4's template also has max
                 raise ValueError("reasoning_effort: none, low, medium, high or max" if hy4
                                  else "reasoning_effort: none, low, medium or high")
         elif key == "temperature":

@@ -159,12 +159,15 @@ EFFORT = {"none": None, "off": None, "minimal": None, "disabled": None, "false":
 
 
 _EFFORT_QWEN = dict(EFFORT)
+_EFFORT_INKLING = {"none": None, "off": None, "disabled": None, "false": None,
+                   "minimal": "minimal", "low": "low", "medium": "medium", "high": "high",
+                   "xhigh": "xhigh", "max": "max", "maximum": "max"}
 _FAMILY: str | None = None
 
 
 def use_family(family: str | None) -> None:
-    """The reasoning-effort words of the model family this server runs (module state, like ENV_TO_USER): the Qwen table, or Hy4-Flash's
-    (its template knows no_think, high and max: serve/hy4_dialect.py)."""
+    """The reasoning-effort words of the model family this server runs (module state, like ENV_TO_USER): the Qwen table, Hy4-Flash's
+    (its template knows no_think, high and max: serve/hy4_dialect.py), or Inkling 2's (minimal, low, medium, high, xhigh, max, or 0..0.99)."""
     global _FAMILY
     _FAMILY = family
     EFFORT.clear()
@@ -172,11 +175,14 @@ def use_family(family: str | None) -> None:
         from serve import hy4_dialect
         EFFORT.update(hy4_dialect.EFFORT)
         return
+    if family == "inkling":
+        EFFORT.update(_EFFORT_INKLING)
+        return
     EFFORT.update(_EFFORT_QWEN)
 
 
 def effort_kwargs(value) -> dict:
-    """A reasoning effort as given by a client -> the template's kwargs.  Unknown values are a 400 on Qwen; Hy4-Flash clamps external client efforts into {no_think, high, max}."""
+    """A reasoning effort as given by a client -> the template's kwargs.  Unknown values are a 400 on Qwen and Inkling 2; Hy4-Flash clamps external client efforts into {no_think, high, max}."""
     if value is None or value == "":
         return {}
     if value is False:
@@ -185,6 +191,23 @@ def effort_kwargs(value) -> dict:
         from serve import hy4_dialect
         mode = hy4_dialect.normalize_effort(value)
         return {"enable_thinking": False} if mode == "no_think" else {"reasoning_effort": mode}
+    if _FAMILY == "inkling":
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            n = float(value)
+            if not math.isfinite(n) or not 0.0 <= n <= 0.99:
+                raise ValueError(f"unknown reasoning effort {value!r}: use none, minimal, low, medium, high, xhigh, max or 0..0.99")
+            return {"enable_thinking": False} if n == 0.0 else {"reasoning_effort": value}
+        key = str(value).strip().lower()
+        if key in EFFORT:
+            level = EFFORT[key]
+            return {"enable_thinking": False} if level is None else {"reasoning_effort": level}
+        try:
+            n = float(key)
+        except ValueError:
+            n = float("nan")
+        if math.isfinite(n) and 0.0 <= n <= 0.99:
+            return {"enable_thinking": False} if n == 0.0 else {"reasoning_effort": n}
+        raise ValueError(f"unknown reasoning effort {value!r}: use none, minimal, low, medium, high, xhigh, max or 0..0.99")
     key = str(value).strip().lower()
     if key not in EFFORT:
         raise ValueError(f"unknown reasoning effort {value!r}: use none, low, medium or high")
