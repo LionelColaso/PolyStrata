@@ -41,6 +41,13 @@ On an RTX 3090 that reads a 2,048-token prompt 3.1% faster (2,068 against 2,005 
 faster. Against a run with every product in halves, it moved the answers no more than the other int8 products do on
 a 302- and an 8,192-token prompt (one prompt each). `STRATA_PREFILL_MXFP4=fp16` keeps them on halves, as before.
 
+UD-Q2_K_XL's Q2_0 experts (the down of 12 layers, rows of 1,152 values) go to the same int8 kernel while it reads a
+prompt: on an RTX 30 card or newer by default, on an RTX 20 card with `--prompt-int8`. On an RTX 2070 Super with
+`--prompt-int8` that reads a 2,048-token prompt 3.2% faster (858 against 831 tokens/s) and an 8,192-token one 3.4%
+faster (902 against 873). Against a run with every product in halves, on six prompts of 302 to 8,192 tokens, the
+answers moved about as much as with the other int8 products alone (less on four prompts, more on two).
+`STRATA_PF_I8MMA=0` keeps every prompt product on halves.
+
 On an RTX 50 card the engine multiplies the experts kept in NVFP4 (most of them, in both sizes) on the FP4 tensor
 cores while it reads a prompt, with the prompt's numbers rounded to about 8 bits instead of 11. That reads a prompt
 1.5 to 1.9 times as fast as multiplying them as halves (`STRATA_PREFILL_NVFP4=fp16`). It moves the answers a little:

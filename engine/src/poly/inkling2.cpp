@@ -255,6 +255,11 @@ void Inkling2::load_geometry() {
         const char* v = std::getenv("STRATA_PREFILL_MXFP4");
         kernels::gemm_iq_i8_allow(39, !(v && std::string(v) == "fp16"));
     }
+    // Q2_0 matrices whose rows are whole 64-value blocks but not whole stages of 256 (UD-Q2_K_XL's down in 12 layers,
+    // rows of 1,152) on the int8 prompt kernel, as the type already is in rows of whole 256s and as the file's other
+    // types are (on Turing with --prompt-int8).  Other models never ask, so their Q2_0 rows of that kind stay on the
+    // FP16 kernel.
+    kernels::gemm_iq_i8_allow(42, true);
     // On Turing, int8 products on (--prompt-int8): a prompt batch's cached experts in a launch a class of rows
     // (Engine::expert_tiles_), the same numbers in fewer launches; STRATA_POLY_EXPERT_TILES=0: a launch a run of slots
     // again.  Not from Ampere on, where the runs' launches were not measured slower.
