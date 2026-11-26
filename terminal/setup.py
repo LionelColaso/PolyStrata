@@ -8402,11 +8402,15 @@ def carry_user_args(old: dict, cfg: dict, explicit: list[str] | None = None) -> 
     nargs = cfg.get("args")
     if not isinstance(nargs, list):
         return []
-    mine = user_args.capture(old, SETUP_CHOICE_FLAGS)
+    skip = SETUP_CHOICE_FLAGS - {"--draft-model"} if (
+        old.get("drafting") == "dflash2"
+        or (isinstance(old.get("args"), list) and "--draft" in old["args"])
+    ) else SETUP_CHOICE_FLAGS
+    mine = user_args.capture(old, skip)
     oargs = old.get("args")
     if user_args.WRITTEN_KEY not in old and isinstance(oargs, list):
         have = {user_args.flag_of(g) for g in user_args.groups(mine)}
-        mine += user_args.flat([g for g in user_args.groups(user_args.dropped_by_setup(oargs, nargs, setup_flags(), SETUP_CHOICE_FLAGS))
+        mine += user_args.flat([g for g in user_args.groups(user_args.dropped_by_setup(oargs, nargs, setup_flags(), skip))
                                 if user_args.flag_of(g) not in have])
         reserve = flag_value(oargs, "--vram-reserve-mib")   # an old file: the reserve it names, unless it is the vision default or the app's own
         vis = isinstance(old.get("vision"), dict)

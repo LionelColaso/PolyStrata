@@ -122,8 +122,7 @@ def under_wsl(env=None, release=None) -> bool:
     if env.get("WSL_DISTRO_NAME"):
         return True
     if release is None:
-        import platform
-        release = platform.uname().release
+        release = os.uname().release if hasattr(os, "uname") else ""
     return "microsoft" in str(release).lower()
 
 
