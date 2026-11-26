@@ -1070,14 +1070,24 @@ void Engine::mind_memory() {
 #endif
 }
 
+#if defined(STRATA_VMM_EQUAL_PIECES) || defined(STRATA_VMM_RELEASE_WITH_ADDRESSES)
+// WSL2: ROCm reaches the card through librocdxg (/dev/dxg, and no /dev/kfd).  Read once.
+static bool vmm_under_dxg() {
+    static const bool on = [] {
+        std::error_code ec;
+        return std::filesystem::exists("/dev/dxg", ec) && !std::filesystem::exists("/dev/kfd", ec);
+    }();
+    return on;
+}
+#endif
+
 #ifdef STRATA_VMM_EQUAL_PIECES
-// Whether a reservation's pieces must all be of one size (hip_compat/cuda.h): under WSL2, where ROCm reaches the card
-// through librocdxg (/dev/dxg, and no /dev/kfd).  STRATA_VMM_EQUAL_PIECES=1 or 0 says it for any Linux HIP build.
+// Whether a reservation's pieces must all be of one size (hip_compat/cuda.h): under WSL2 (vmm_under_dxg()).
+// STRATA_VMM_EQUAL_PIECES=1 or 0 says it for any Linux HIP build.
 static bool vmm_equal_pieces() {
     static const bool on = [] {
         if (const char* v = std::getenv("STRATA_VMM_EQUAL_PIECES"); v && v[0]) return v[0] != '0';
-        std::error_code ec;
-        return std::filesystem::exists("/dev/dxg", ec) && !std::filesystem::exists("/dev/kfd", ec);
+        return vmm_under_dxg();
     }();
     return on;
 }
@@ -1280,9 +1290,37 @@ void Engine::vmm_map(Mapped& m, size_t bytes, size_t piece, const char* what) {
     }
 }
 
+#ifdef STRATA_VMM_RELEASE_WITH_ADDRESSES
+// WSL2 (the card through /dev/dxg, no /dev/kfd: librocdxg) gives a released piece's VRAM back at the release, with its
+// addresses still reserved: a 64 MiB handle unmapped and released came back whole within 100 ms (an RX 9060 XT and an
+// RX 9070 XT class card under WSL2, ROCm 7.2.4).  So there the kept pieces are not unmapped and mapped again (below):
+// that cycle was the 4.2 s hipMemUnmap at an 8K prompt's first read.  STRATA_VMM_READDRESS=1 keeps the cycle there too;
+// =0 skips it on any Linux HIP build (a test switch: on native amdgpu the released VRAM then stays the process's, and
+// the engine says so).  A release whose VRAM does not come back within the wait turns the cycle on from then on.
+static bool& vmm_release_frees() {
+    static bool on = [] {
+        if (const char* v = std::getenv("STRATA_VMM_READDRESS"); v && v[0]) {
+            if (v[0] == '0' && !vmm_under_dxg())
+                std::fprintf(stderr, "strata-poly: STRATA_VMM_READDRESS=0 outside WSL2: VRAM given back stays this "
+                                     "process's until it ends\n");
+            return v[0] == '0';
+        }
+        return vmm_under_dxg();
+    }();
+    return on;
+}
+#endif
+
 // Gives back the pieces of m that lie past its first `bytes`.  The card must be done with them.
 void Engine::vmm_unmap(Mapped& m, size_t bytes) {
     const size_t had = m.mapped;
+#ifdef STRATA_VMM_RELEASE_WITH_ADDRESSES
+    size_t free0 = 0;
+    if (!pool_on_ && vmm_release_frees() && m.mapped > bytes) {
+        size_t t = 0;
+        (void) cudaMemGetInfo(&free0, &t);
+    }
+#endif
     while (!m.pieces.empty() && m.mapped - m.pieces.back().second >= bytes) {
         const auto [h, n] = m.pieces.back();
         m.mapped -= n;
@@ -1299,6 +1337,24 @@ void Engine::vmm_unmap(Mapped& m, size_t bytes) {
     // has left, the slots, the recorded launches and m point at VRAM that is not there: a step that fails from
     // there on ends the engine (the server starts it again for the next request) rather than reading that VRAM.
     if (m.mapped == had || !m.base) return;
+    // WSL2 (vmm_release_frees()): the VRAM is back already, counted a moment later (as below, 100 ms at most), and the
+    // kept pieces stay where they are.  Not for a map given back whole (m.pieces empty): a read's rows are mapped again
+    // with another piece size, which librocdxg refuses after a larger one in the same reservation (vmm_map()), so that
+    // one still gets fresh addresses - there is nothing kept to map again, so the cycle costs nothing there.
+    if (vmm_release_frees() && !m.pieces.empty()) {
+        const size_t want = free0 + (had - m.mapped) / 8 * 7;
+        size_t f = 0, t = 0;
+        for (int i = 0; i < 100 && f < want; ++i) {
+            (void) cudaMemGetInfo(&f, &t);
+            if (f < want) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        if (f >= want) return;
+        vmm_release_frees() = false;   // this driver kept it: the cycle from now on, this time included
+        std::fprintf(stderr, "strata-poly: the VRAM given back did not come back without its addresses (%zu of %zu MiB "
+                             "within 100 ms): mapping the kept VRAM again from now on\n",
+                     f > free0 ? (f - free0) >> 20 : 0, (had - m.mapped) >> 20);
+    }
+    // The cycle (native amdgpu): below.
     const auto must = [](CUresult r, const char* what) {
         if (r == CUDA_SUCCESS) return;
         const char* s = nullptr;

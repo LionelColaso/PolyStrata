@@ -51945,6 +51945,39 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_VMM_READDRESS",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/poly/engine.cpp",
+     "line": 1247,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "c1fb2f7ddd",
+   "first_date": "2026-11-24",
+   "since": null,
+   "last_commit": "c1fb2f7ddd",
+   "last_date": "2026-11-24",
+   "status": "rollback",
+   "owner": "",
+   "note": "HIP on Linux: whether VRAM given back keeps the process's addresses. 1 keeps the unmap-and-map cycle of the kept pieces after a release (the earlier behaviour), 0 skips it. Unset: skipped under WSL2 (/dev/dxg without /dev/kfd), where librocdxg gives released VRAM back at once; kept on native amdgpu, where it does not. On native Linux =0 is a test switch: the released VRAM then stays the process's.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_VMM_SETTLE",
    "backends": [
     "cuda-hip"
