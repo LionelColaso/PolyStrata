@@ -1235,7 +1235,7 @@ protected:
     bool picks_like_alone() const;
     bool picks_like_alone(const Layer& L) const;
     void bell_serve();
-    void bell_job();
+    bool bell_job(uint32_t seq);
     void bell_unwind();
     uint8_t* stage_ = nullptr;                    ///< experts that are not cached, on their way through VRAM
     uint8_t* h_stage_[2] = {};                    ///< pinned; filled in turn

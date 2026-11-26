@@ -104,7 +104,7 @@ void ExpertCard::scales(int il, const std::vector<float>& gate, const std::vecto
 // What Engine::moe()'s launch does with the first card's cached experts, on this card: the rows' inputs quantized,
 // gate and up, the activation, its quantization, down, then each output times its weight into its token's row.
 void ExpertCard::start(const Layer& L, int il, const float* x, int m, const Job* jobs, int n, float limit, bool gelu,
-                       float situ_beta, float situ_lb) {
+                       float situ_beta, float situ_lb, float* dst_rows, void* bell, uint32_t seq) {
     if (m < 1 || m > kCpuRows)
         throw std::invalid_argument("--expert-gpu: row count " + std::to_string(m) + " outside 1.." +
                                     std::to_string(kCpuRows));
@@ -164,8 +164,22 @@ void ExpertCard::start(const Layer& L, int il, const float* x, int m, const Job*
             if (q == kSumRows - 1 || i0 + j == n - 1) add_scaled(sum, q + 1, n_embd_, st);
         }
     }
-    ck(cudaMemcpyAsync(out_, acc_, (size_t) m * row * sizeof(float), cudaMemcpyDeviceToHost, st), "--expert-gpu output");
-    pending_ = m;
+    if (dst_rows) {
+        ck(cudaMemcpyAsync(dst_rows, acc_, (size_t) m * row * sizeof(float), cudaMemcpyDeviceToHost, st),
+           "--expert-gpu output");
+        if (bell) bell_ack((ExpertBell*) bell, seq, st);
+        pending_ = 0;
+    } else {
+        ck(cudaMemcpyAsync(out_, acc_, (size_t) m * row * sizeof(float), cudaMemcpyDeviceToHost, st),
+           "--expert-gpu output");
+        pending_ = m;
+    }
+}
+
+void ExpertCard::sync() {
+    OnDevice on(device_);
+    if (stream_) cudaStreamSynchronize((cudaStream_t) stream_);
+    pending_ = 0;
 }
 
 void ExpertCard::finish_into(float* rows) {
