@@ -42,8 +42,8 @@ protected:
     void alloc_caches() override;
     void assign_scratch() override;
     // A call of a few tokens keeps a scratch of its own, and a prompt batch's is lent to the expert cache between
-    // prompts (Engine::use_scratch()).  Not with the drafter, whose features are a whole call's rows, nor on ROCm on
-    // Linux, nor where nothing would be lent: the experts frozen, or every one of them in VRAM (inkling2.cpp).
+    // prompts (Engine::use_scratch()); the drafter's features are strided by the layout's rows (buf_rows_).  Not on
+    // ROCm on Linux, nor where nothing would be lent: the experts frozen, or every one of them in VRAM (inkling2.cpp).
     bool scratch_layouts() const override;
     bool scores_apart() const;   ///< the attention's scores outside the scratch, for its two layouts to share
     bool every_expert_fits() const;
