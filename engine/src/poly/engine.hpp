@@ -533,6 +533,9 @@ protected:
     /// Whether read() may take a prompt's calls through a layer together before the next layer.  Not where a call's
     /// layers keep rows of their own between them, or do not run in order.
     virtual bool reads_by_layer() const { return true; }
+    /// Where the staging buffer cannot be lent (ROCm on Linux), whether load() may size it to what the filled cache
+    /// leaves out of a layer (trim_stage()) in place of a whole layer.
+    virtual bool trims_stage() const { return false; }
     /// Rows a token keeps of its own from one layer run to the next beside its rows of r_ (Inkling 2's residual
     /// streams).  Where there are any, read() takes a group of calls through each layer run, in the order next_layer()
     /// gives, with the group's rows and these on the card (read_groups()).  carry_at() points the architecture's
@@ -870,6 +873,7 @@ protected:
     void fill_now();
     void widen_stage();
     void narrow_stage();
+    void trim_stage();
     void resize_card_cache(int mib);   ///< resize_cache() and mind_vram() for this engine's card
     bool mind_card_vram();
     size_t trim_card_kv(int64_t end);
@@ -1267,6 +1271,8 @@ protected:
     Mapped stage_map_;                            ///< stage_'s VRAM when it can grow for a read (stage_read_mib)
     size_t stage_narrow_ = 0, stage_wide_ = 0;    ///< stage_bytes_ outside a read and inside one
     bool stage_lent_ = false;                     ///< the expert cache has lent the buffer VRAM (widen_stage())
+    bool stage_trims_ = false;                    ///< stage_map_ in pieces that trim_stage() cuts after the fill
+    size_t stage_full_ = 0;                       ///< its size before the cut, mapped again for resize_cache()
     size_t stage_cut_ = 0;                        ///< what the cache gave up for it, which it takes back
     int stage_turn_ = 0;
     std::vector<int32_t> ids_, count_, first_, group_, round_, round_row_;

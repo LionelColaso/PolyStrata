@@ -70,6 +70,7 @@ protected:
     bool batch_heads() const override { return true; }
     bool tail_by_rows() const override { return true; }
     bool reads_by_layer() const override { return false; }
+    bool trims_stage() const override { return true; }
     // A call's residual streams and the core's bank from one layer run to the next: read() takes the calls through
     // the runs a group at a time.  With the drafter, its taps of three runs and the final normed state too, which
     // ds_commit() reads at the call's last layer run (ds_tap_'s four blocks).

@@ -2703,7 +2703,14 @@ void Engine::ensure_stage() {
 #if defined(STRATA_GPU_METAL)
     if (opt_.metal_balanced && all_cached()) return;
 #endif
-    if (stage_wide_ > stage_narrow_) {
+    if (stage_trims_) {
+        // whole pieces of kArenaPiece, all of one size: native Fedora's ROCm 7.2.4 (an RX 9070 XT) refused the 8 MiB
+        // piece after the 64 MiB ones ("no VRAM"), as WSL's does (STRATA_VMM_EQUAL_PIECES)
+        stage_full_ = stage_narrow_;
+        vmm_reserve(stage_map_, up_to(stage_narrow_ + 256 + kTail, kArenaPiece));
+        vmm_map(stage_map_, stage_map_.reserved, kArenaPiece, "the expert staging buffer");
+        stage_ = (uint8_t*) stage_map_.base;
+    } else if (stage_wide_ > stage_narrow_) {
         vmm_reserve(stage_map_, stage_wide_ + 256 + kTail);
         // with the pool the buffer comes out of it, and out of the expert cache when the pool lacks the room
         if (pool_on_ && pool_claimed_ && exp_) {
@@ -2794,7 +2801,13 @@ void Engine::resize_card_cache(int mib) {
     metal_cache_bytes_ = 0;
 #endif
     opt_.vram_reserve_mib = mib < 0 ? asked_reserve_mib_ : mib;
+    if (stage_trims_ && stage_ && stage_full_ > stage_bytes_) {   // the whole layer again, cut for the new cache below
+        if (up_) ck(cudaStreamSynchronize(cs(up_)), "resize");
+        vmm_map(stage_map_, stage_map_.reserved, kArenaPiece, "the expert staging buffer");
+        stage_bytes_ = stage_narrow_ = stage_wide_ = stage_full_;
+    }
     fill_expert_cache();
+    trim_stage();
     ensure_stage();
     start_swaps();
 }
@@ -2951,6 +2964,68 @@ void Engine::narrow_stage() {
     stage_lent_ = false;
     if (exp_ && stage_cut_ > 0) grow_cache(stage_cut_, true);
     stage_cut_ = 0;
+}
+
+// ROCm on Linux lends nothing (vmm_unmap() gives VRAM back only with its addresses), so the staging buffer is a
+// whole layer for the run: 1,033 MiB for Inkling 2 Mini IQ4_NL, whose last four layers are Q8_0 (128 experts of
+// 8.1 MiB).  A call copies through it only the experts the cache lacks, so once the cache is filled the buffer is
+// cut to the most of those a layer has, with a margin for the experts the attention caches may still take from
+// the cache as they grow (spread over the layers by bytes) plus kStageSpare, and the VRAM goes to the expert cache.
+// It keeps room for vram_ahead()'s groups of 4 slots, so that ahead_slots_ and the router launches that go with it
+// stay as they were (HIP builds no mirror, so nothing is uploaded into them).  A call that lacks more experts than
+// the buffer holds copies them in rounds, as a call of a layer larger than the buffer always did.  Where a row's
+// product depends on the launch's rows (Mmq::split_exact() false: RDNA4's default BLAS loop, CDNA's stream-k) its last
+// bits then differ from one round's; the margin keeps that to a cache that lost more than the attention caches take,
+// which a frozen cache never does.  STRATA_POLY_STAGE_FIT=0 keeps the whole layer.
+void Engine::trim_stage() {
+#if defined(STRATA_VMM_RELEASE_WITH_ADDRESSES) && !defined(STRATA_GPU_METAL)
+    constexpr int kStageSpare = 4, kAheadSlots = 4;
+    if (!stage_trims_ || !mmq_ || !stage_ || !exp_ || all_cached()) return;
+    // what the cache may still give up: the attention caches still to map, and the reserve that mind_vram() keeps
+    // free once the recorded launches have taken theirs
+    size_t kv_left = size_t(std::max(reserve_mib_, 0)) << 20;
+    for (const Kv& k : kv_) kv_left += k.reserved - k.mapped;
+    for (const Seq& q : seqs_)
+        for (const Kv& k : q.kv) kv_left += k.reserved - k.mapped;
+    size_t slots = 0;   // a slot of each MoE layer
+    for (const Layer& L : layers_)
+        if (L.moe) slots += L.slot_bytes ? L.slot_bytes : L.gu_step + L.d_bytes;
+    const int spare = kStageSpare + (slots ? (int) ((kv_left + slots - 1) / slots) : 0);
+    size_t miss = 0;
+    for (const Layer& L : layers_) {
+        if (!L.moe) continue;
+        int lacks = 0;
+        for (int e = 0; e < n_expert_; ++e) lacks += !L.slot[(size_t) e];
+        miss = std::max(miss, (size_t) std::min(lacks + spare, n_expert_) * (L.gu_step + L.d_bytes));
+    }
+    const size_t stride = (slot_max_ + 4095) / 4096 * 4096;   // ahead_stride_, set later in load()
+    // vram_ahead()'s groups, and card_rows() slots so that far_plan()'s buffer still fits (STRATA_POLY_CARD_FAR)
+    const size_t floor = (size_t) std::max((kAheadGroups + 1) * kAheadSlots, card_rows()) * stride;
+    const size_t want = std::min(stage_bytes_, std::max(miss, floor));
+    const size_t piece = stage_map_.pieces.empty() ? kArenaPiece : stage_map_.pieces.front().second;
+    const size_t had = stage_map_.mapped, now = up_to(want + 256 + kTail, piece);
+    if (now + kArenaPiece > had) {   // less than a piece of the cache to gain
+        std::fprintf(stderr, "strata-poly: the expert staging buffer stays at %zu MiB: a call may copy %zu MiB "
+                             "(%d experts spare a layer for %zu MiB the cache may still give up)\n",
+                     stage_bytes_ >> 20, want >> 20, spare, kv_left >> 20);
+        return;
+    }
+    if (up_) ck(cudaStreamSynchronize(cs(up_)), "the expert staging buffer");
+    ck(cudaStreamSynchronize(cs(st_)), "the expert staging buffer");
+    vmm_unmap(stage_map_, want + 256 + kTail);   // whole pieces: what it keeps covers `want`
+    const size_t was = stage_bytes_, freed = had - stage_map_.mapped;
+    stage_bytes_ = stage_narrow_ = stage_wide_ = std::min(was, stage_map_.mapped - 256 - kTail);   // whole pieces' worth
+    staged_il_ = -1;
+    const int before = cached_;
+    // STRATA_GPU_EXPERTS holds the cache to its N: the buffer is cut all the same, and the VRAM stays free.  A freeze
+    // (STRATA_FREEZE_EXPERTS) holds the cache still from the first request on, not during the load.
+    const bool frozen = std::exchange(freeze_experts_, false);
+    const int took = expert_cap_ < 0 ? grow_cache(freed) : 0;
+    freeze_experts_ = frozen;
+    std::fprintf(stderr, "strata-poly: the expert staging buffer %zu -> %zu MiB (the most a layer's call copies); the "
+                         "expert cache %d -> %d experts\n",
+                 was >> 20, stage_bytes_ >> 20, before, before + took);
+#endif
 }
 
 // The cache's VRAM and the attention caches' as they are now become the budget cover() keeps them to.
@@ -3629,6 +3704,7 @@ void Engine::load(const Options& o) {
 #if !defined(STRATA_GPU_METAL)
     fill_expert_card();
 #endif
+    trim_stage();
     ensure_stage();
     if (mmq_ && !all_cached()) stage_pins();
     // The weights and the expert cache are written on st_ now (h2d(), zero_vram()): the load is not over until
@@ -4245,6 +4321,16 @@ void Engine::alloc() {
         stage_narrow_ = stage_wide_ = stage_bytes_;
         if (widens && read_mib > 0)
             stage_wide_ = std::max(stage_bytes_, std::min((size_t) read_mib << 20, (size_t) n_expert_ * one_expert));
+#if defined(STRATA_VMM_RELEASE_WITH_ADDRESSES) && !defined(STRATA_GPU_METAL)
+        // trim_stage(): mapped in pieces, which it gives back once the cache is filled.  Not a cudaMalloc it frees and
+        // makes again smaller: on ROCm 7.2.4 (an RX 9070 XT) the expert cache's addresses then could not be reserved
+        // again where they were the next time it gave VRAM back (vmm_unmap()), and the engine stopped.
+        {
+            const char* trim = std::getenv("STRATA_POLY_STAGE_FIT");
+            stage_trims_ = trims_stage() && opt_.stage_mib <= 0 && widens && !pool_on_ && stage_wide_ == stage_narrow_ &&
+                           !(trim && trim[0] == '0');
+        }
+#endif
 #if defined(STRATA_GPU_METAL)
         if (!opt_.metal_balanced)
 #endif

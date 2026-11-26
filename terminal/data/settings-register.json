@@ -34564,6 +34564,39 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_POLY_STAGE_FIT",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/poly/engine.cpp",
+     "line": 4281,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "flag",
+   "default_state": "on",
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": null,
+   "first_date": null,
+   "since": null,
+   "last_commit": null,
+   "last_date": null,
+   "status": "rollback",
+   "owner": "",
+   "note": "HIP on Linux (VMM builds): 0 keeps strata-poly's expert staging buffer at a whole layer for the run, as before it was cut to the most experts a call copies once the expert cache is filled (Engine::trim_stage()). Not STRATA_STAGE_TRIM, which is the program engine's split-stack weight trim.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_POLY_STEP_GRAPHS",
    "backends": [
     "cuda-hip"
