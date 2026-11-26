@@ -237,8 +237,8 @@ the bus once for the group instead of once for every call and every pass of the 
 `--kv fp8` keeps the attention caches in 8 bits instead of 16, which leaves about 0.7 GB more VRAM for the experts at
 a 32K context.
 `--kv fp8` needs an NVIDIA card from Ampere on. `--kv q8_0` saves about the same (Q8_0 blocks: 8-bit codes and a
-16-bit scale for every 32 values) without FP8 hardware: checked on Turing by its kernel test; AMD not run yet, and a
-Mac refuses it. Both are opt-in and change the answers slightly.
+16-bit scale for every 32 values) without FP8 hardware: checked on Turing by its kernel test; ran on AMD Windows
+([#347](https://github.com/simplexai-labs/PolyStrata/issues/347), RX 9070 XT up to 256K/512K); a Mac refuses it. Both are opt-in and change the answers slightly.
 With `--kv q8_0`, `STRATA_KV_INT8=1` (the name of Kolibri's opt-in) takes the attention scores of a written token that
 reads 32,768 keys or more (only the full-attention layers' tokens do) by `__dp4a`, with the queries quantized to Q8_0
 codes too. Written tokens are a token alone (the prompt's last token is read so too) or a window of guessed ones; the
@@ -288,8 +288,8 @@ RX 7900 XT's; after 302 and 8,192 tokens they match CUDA's. With some experts in
 the card, which hands the experts it lacks to the CPU through the doorbell, as on NVIDIA: no wait for the host at
 each layer. The card's routing rounds a little differently from the host's; `STRATA_POLY_BELL=0` routes on the host
 as before. Users have since run it without a container: an RX 9070
-XT on Windows 11 with the engine setup built ([#323](https://github.com/simplexai-labs/PolyStrata/issues/323)) and an
-RX 9060 XT on Linux ([#309](https://github.com/simplexai-labs/PolyStrata/issues/309)). Use an NVIDIA card or a Mac for now.
+XT on Windows 11 with the engine setup built ([#323](https://github.com/simplexai-labs/PolyStrata/issues/323), [#347](https://github.com/simplexai-labs/PolyStrata/issues/347)), an
+RX 9060 XT on Linux ([#309](https://github.com/simplexai-labs/PolyStrata/issues/309)), and an RX 9070 XT on Linux ([#342](https://github.com/simplexai-labs/PolyStrata/pull/342)). Use an NVIDIA card or a Mac for now.
 
 Not run yet: `--expert-gpu` on two cards (built but not run), `--layer-split`
 on two unequal cards (below; it has run on two RTX 2070 Super), UD-Q4_K_XL on the 8 GB card and UD-Q4_K_XL on a Mac.
