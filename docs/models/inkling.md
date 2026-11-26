@@ -158,7 +158,7 @@ the group ranks it fifth or lower.
 | --- | --- | --- |
 | `--attn-requant q5_k` | the attention's matrices in 5 bits (Q5_K) instead of 8: fewer bytes a token, and more VRAM for experts | rounding |
 | `--loop-bf16` | the loop controllers in BF16 instead of F32 | rounding |
-| `--expert-swaps 0` | no expert moves into VRAM while an answer is written (default 64 on their way at a time) | rounding: the same experts, but more of them on the CPU, which rounds a little differently |
+| `--expert-swaps 0` | no expert moves into VRAM while an answer is written (default 128 on their way at a time for Inkling 2, 64 on Metal) | rounding: the same experts, but more of them on the CPU, which rounds a little differently |
 | `--tail-skip 4` | a token's experts ranked 5th to 8th that are not on the card are left out | **skips computation** |
 
 Measured on main d1f711e11, one setting at a time and all four, with ggml-org's IQ4_NL file and with UD-Q2_K_XL

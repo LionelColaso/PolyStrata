@@ -2244,6 +2244,21 @@ void Inkling2::tail_rows(int il, int n) {
     axpy(fc_, 1.f, r_, n * n_embd_, true, st_);
 }
 
+int Inkling2::swap_half() const {
+    static const int half = [] {
+        const char* v = std::getenv("STRATA_SWAP_HALF");
+        if (!v || !v[0]) return 32;
+        const int n = std::atoi(v);
+        if (n < 1 || n > 65536) {
+            std::fprintf(stderr, "strata-poly: STRATA_SWAP_HALF=%s is not 1 to 65536 tokens: the default, 32\n", v);
+            return 32;
+        }
+        std::fprintf(stderr, "strata-poly: the expert cache's uses halve every %d tokens (STRATA_SWAP_HALF)\n", n);
+        return n;
+    }();
+    return half;
+}
+
 // After the core's last layer, its first again, until the passes are done.  Called for every layer a call runs,
 // replayed or not, so the pass is right for the recordings' keys.
 int Inkling2::next_layer(int il) {

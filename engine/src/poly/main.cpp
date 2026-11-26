@@ -1971,8 +1971,8 @@ void usage() {
                  "                         Metal default: q8_0 for a compatible Qwen35MoE geometry, else fp16\n"
 #endif
                  "  --expert-swaps N       while an answer is written, up to N experts it keeps using are on their way\n"
-                 "                         into VRAM, in place of cached ones it uses less (default 64, 0 = the cache\n"
-                 "                         stays as it was loaded)\n"
+                 "                         into VRAM, in place of cached ones it uses less (default 64, Inkling 2: 128;\n"
+                 "                         up to 256; 0 = the cache stays as it was loaded)\n"
                  "  --ram-experts-mib N    hold N MiB of RAM for the experts outside VRAM, during answers too: the ones\n"
                  "                         used most lately; the rest stay in the file cache for other programs to take,\n"
                  "                         and are read back when a token needs them (default: all of them when they\n"

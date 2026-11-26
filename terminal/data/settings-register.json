@@ -47426,6 +47426,39 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_SWAP_HALF",
+   "backends": [
+    "cuda-hip"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/poly/inkling2.cpp",
+     "line": 2108,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "int",
+   "default_state": null,
+   "code_default": null,
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [],
+   "first_commit": "c1a69e3ccb",
+   "first_date": "2026-11-24",
+   "since": null,
+   "last_commit": "c1a69e3ccb",
+   "last_date": "2026-11-24",
+   "status": "opt-in",
+   "owner": "poly",
+   "note": "Inkling 2 only: the tokens over which follow()'s recent expert uses halve (Engine::swap_half(); default 32, kSwapHalf 128 for every other family). STRATA_SWAP_HALF=N, 1 to 65536, sets it (128 = the old behaviour); logged at start. Placement only: which experts sit in VRAM, not the arithmetic of either path.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_SWITCH_POINT",
    "backends": [
     "cuda-hip"

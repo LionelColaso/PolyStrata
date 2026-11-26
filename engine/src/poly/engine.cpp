@@ -2536,7 +2536,7 @@ void Engine::fill_expert_cache() {
         if (arena < all) {
             if (mmq_ && !stage_) metal_stage_need += stage_bytes_ + 256 + kTail + 2 * chunk_bytes_;
             if (!swap_ && opt_.expert_swaps != 0)   // -1 is decided after the cache is filled: as many as it can be
-                metal_stage_need += (size_t) (opt_.expert_swaps < 0 ? 64 : opt_.expert_swaps) * slot_max_;
+                metal_stage_need += (size_t) (opt_.expert_swaps < 0 ? default_swaps() : opt_.expert_swaps) * slot_max_;
             if (metal_cache_limit_ == SIZE_MAX && !recorded_)
                 metal_stage_need += size_t(scratch_at_) * sizeof(float) + state_n_ * sizeof(float) + (size_t(512) << 20);
             else if (arena > (size_t(512) << 20))
@@ -3182,6 +3182,8 @@ void Engine::follow_loop() {
     }
 }
 
+int Engine::swap_half() const { return kSwapHalf; }
+
 // The cache follows what is written.  Called at the start of an eval, where nothing queued reads the cache, with
 // the number of tokens the eval writes (0 for a prompt batch).  The experts whose upload has arrived get their
 // slots.  Then, for written tokens, the experts used lately that the cache lacks start on their way, each to the
@@ -3261,7 +3263,7 @@ void Engine::follow(int written) {
         n_free += s.at.load() == Swap::kFree;
     }
     if (written <= 0) return;
-    const float keep = std::exp2(-(float) written / (float) kSwapHalf);
+    const float keep = std::exp2(-(float) written / (float) swap_half());
     for (float& r : recent_) r *= keep;
     const auto from_pool = [&](Swap& s) {   // the slot follow_loop() copies s from, held until s arrives
         s.from = -1;
@@ -3294,6 +3296,9 @@ void Engine::follow(int written) {
     // forced, 16 a window took the mirror's spares faster than arrivals gave them back, and calls fell back to the
     // host; 1 a window kept the cache from following the answer.
     if (card_far_) n_free = std::max(0, std::min(n_free, kFarTrades));
+    // Trades take a mirror spare each for the expert that goes out (build_mirror() keeps about kSwapTrades): more
+    // uploads at a time (Inkling 2's default_swaps()) only fill a read's empty slots sooner, trades stay as many.
+    n_free = std::min(n_free, kSwapTrades);
     if (n_free == 0) {
         if (asked) {
             { std::lock_guard<std::mutex> l(swap_m_); }
@@ -3422,8 +3427,8 @@ void Engine::load(const Options& o) {
         throw std::runtime_error("a prompt batch is 1 to 4096 tokens");
     if (opt_.stage_mib < 0) throw std::runtime_error("the staging buffer must be at least 1 MiB (0: the default)");
     if (opt_.stage_ahead < 0) throw std::runtime_error("the batch size to stage ahead from cannot be negative");
-    if (opt_.expert_swaps < -1 || opt_.expert_swaps > 64)
-        throw std::runtime_error("0 to 64 experts can be on their way into the cache at a time (-1: the default)");
+    if (opt_.expert_swaps < -1 || opt_.expert_swaps > 256)
+        throw std::runtime_error("0 to 256 experts can be on their way into the cache at a time (-1: the default)");
     if (opt_.window < 0 || opt_.window > 8)
         throw std::runtime_error("a window is 1 to 8 tokens, or 0 for the model's own");
     if (opt_.lock_experts && opt_.ram_experts_mib >= 0)
@@ -3739,7 +3744,7 @@ void Engine::load(const Options& o) {
     // and 5,120 MiB 87 and 98, UD-Q4_K_M there 31 and 38, Gemma 4 UD-Q6_K_XL with 5,120 MiB under 11 GiB at 6.9 GB
     // 100 and 137, at 2.9 GB 42 and 78.  In unified memory a swap is a copy within RAM: on the M5 Ultra held to 6-7
     // GiB, 64 of them wrote 3-5% faster.
-    if (opt_.expert_swaps < 0) opt_.expert_swaps = 64;
+    if (opt_.expert_swaps < 0) opt_.expert_swaps = default_swaps();
     if (opt_.ram_experts_mib >= 0) {
         // each size of slot takes the share of the budget its experts outside VRAM have of all of those
         pool_size_of_.assign(layers_.size(), 0);
@@ -6216,7 +6221,7 @@ void Engine::build_mirror() {
     size_t total = 0;
     for (size_t c = 0; c < (size_t) n_trade_; ++c) {
         if (!stride[c]) continue;
-        spares[c] = 1 + (size_t) (64.0 * (cached_all ? (double) cached[c] / (double) cached_all : 1.0));
+        spares[c] = 1 + (size_t) ((double) kSwapTrades * (cached_all ? (double) cached[c] / (double) cached_all : 1.0));
         total += (want[c].size() + spares[c]) * stride[c];
     }
     constexpr size_t kHeadroom = size_t(4) << 30;   // as the RAM budget's (load())
