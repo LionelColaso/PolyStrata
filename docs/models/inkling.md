@@ -367,6 +367,11 @@ Thinking effort can be set per request (`reasoning_effort`) or in the run config
 `0.99` (for example `0.7`). When omitted, `UD-Q2_K_XL` defaults to `low` (`0.2`) and `UD-Q3_K_XL` / `UD-Q4_K_XL`
 default to `0.4`, keeping thinking concise and avoiding long loops.
 
+Optional LoopCD-Hidden extrapolation at the loop core exit can be enabled with `--loopcd-hidden F` (`0` to `1`,
+default `0` = off; `STRATA_INK_LOOPCD_HIDDEN=F` overrides it). For example, `--loopcd-hidden 0.2` on `UD-Q2_K_XL` or
+at `low` thinking effort extrapolates the final loop pass away from the first pass with negligible decode overhead and
+stays compatible with DSpark speculative decoding across CUDA, HIP, and Metal.
+
 ## Checking a change to the engine
 
 Two tools, built with `strata-poly` (CUDA and HIP), check that a change to Inkling 2's code keeps its output:

@@ -224,6 +224,9 @@ void ink_store_ring(const float* x, uint16_t* cache, int n, int64_t pos, int row
 /// logits[i] = cap * tanh(logits[i] / cap) for the first n_keep, -infinity for the rest of n_all, a row each.
 void ink_softcap(float* logits, int n_keep, int n_all, int rows, float cap, void* stream);
 
+/// LoopCD-Hidden in-place extrapolation: dst[i] += omega * (dst[i] - ref[i]), n values.
+void ink_loopcd_extrap(float* dst, const float* ref, float omega, size_t n, void* stream);
+
 /// One token's ink_conv() of K and V with their states, ink_clip() of Q, K and the relative positions' values,
 /// ink_head_rms() of V, and the stores of K and V as cache row p, or p % ring when ring > 0 (p: pos, or at[0] when the
 /// card holds it), in one launch with the same bits.  Heads of up to 128 values.

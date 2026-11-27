@@ -231,6 +231,20 @@ void Inkling2::load_geometry() {
                                  : 0;
     if (attn_type_) guess_type_ = attn_type_;
     ctrl_bf16_ = opt_.loop_bf16;
+    loopcd_hidden_ = opt_.loopcd_hidden;
+    if (const char* v = std::getenv("STRATA_INK_LOOPCD_HIDDEN"); v && *v) {
+        char* end = nullptr;
+        const float x = std::strtof(v, &end);
+        if (end == v || *end != '\0' || !std::isfinite(x) || x < 0.f || x > 1.f)
+            throw std::runtime_error(std::string("invalid STRATA_INK_LOOPCD_HIDDEN (expected 0 to 1): ") + v);
+        loopcd_hidden_ = x;
+    }
+    need(std::isfinite(loopcd_hidden_) && loopcd_hidden_ >= 0.f && loopcd_hidden_ <= 1.f,
+         "--loopcd-hidden must be between 0 and 1");
+    if (loopcd_hidden_ != 0.f) {
+        need(n_pass_ >= 2, "LoopCD-Hidden requires at least 2 loop passes");
+        std::fprintf(stderr, "strata-poly: LoopCD-Hidden active (omega=%.4f, passes=%d)\n", loopcd_hidden_, n_pass_);
+    }
 #if !defined(STRATA_GPU_METAL)
     // Turing's prompt products on the int8 kernel that Ampere and newer take by default (i8_mma.cuh), only with
     // --prompt-int8: on Turing it gave the same most likely token as the halves at 560 of 576 steps (97.2%), under
@@ -976,6 +990,10 @@ void Inkling2::assign_scratch() {
     std::copy(bl_, bl_ + kBlocks, home_);
     home_[kBlocks] = bank_;
     home_[kBlocks + 1] = bank_out_;
+    if (loopcd_hidden_ != 0.f) {
+        cd_h1_ = cd_home_[0] = fbuf(e);
+        cd_bl2_ = cd_home_[1] = fbuf(e);
+    }
     for (float*& b : in_) b = fbuf(e);
     for (float*& b : xin_) b = fbuf(e);
     for (float*& b : msg_) b = fbuf(e);
@@ -2178,6 +2196,18 @@ void Inkling2::layer_head(Layer& L, int il, int n) {
 // The experts' sum through its convolution, onto the stream; after the last layer, the drafter's features.
 void Inkling2::layer_tail(Layer&, int il, int n) {
     tail_rows(il, n);
+    if (loopcd_hidden_ != 0.f && il == core_end_ - 1) {
+        const int core_block = core_start_ / blk_;
+        const int n_bank = (core_end_ - core_start_) / blk_ - 1;
+        if (pass_ == 0) {
+            copy_rows(r_, cd_h1_, n);
+            if (n_bank > 0) copy_rows(bl_[core_block + 1], cd_bl2_, n);
+        } else if (pass_ == n_pass_ - 1) {
+            const size_t ne = (size_t) n * n_embd_;
+            ink_loopcd_extrap(r_, cd_h1_, loopcd_hidden_, ne, st_);
+            if (n_bank > 0) ink_loopcd_extrap(bl_[core_block + 1], cd_bl2_, loopcd_hidden_, ne, st_);
+        }
+    }
     if (ds_file_ && il == n_layer_ - 1) ds_commit(n);
 }
 
@@ -2186,9 +2216,10 @@ void Inkling2::tail_rows(int il, int n) {
     if (std::exchange(moe_left_, false)) {   // moe_card() left the experts' sum here
 #if defined(STRATA_GPU_METAL)
         const bool loop_restart = il == core_end_ - 1 && pass_ + 1 < n_pass_;
+        const bool cd_block_fuse = loopcd_hidden_ != 0.f && il == core_end_ - 1;
         const int next_il = il + 1;
         if (n > 1) {
-            if (n <= kConvFew && whole_rec_ && !rows_of_ && !loop_restart && next_il < hi_ && n_embd_ <= 4096) {
+            if (n <= kConvFew && whole_rec_ && !rows_of_ && !loop_restart && !cd_block_fuse && next_il < hi_ && n_embd_ <= 4096) {
                 const Block& NB = blocks_[(size_t) next_il];
                 const int next_pass = next_il >= core_start_ && next_il < core_end_ ? pass_ : 0;
                 const bool next_looped = next_pass > 0;
@@ -2218,7 +2249,7 @@ void Inkling2::tail_rows(int il, int n) {
                                   snap_of(past_f(S)), rec_n_, snap_bits_);
             return;
         }
-        if (whole_rec_ && !loop_restart && next_il < hi_ && n_embd_ <= 4096) {
+        if (whole_rec_ && !loop_restart && !cd_block_fuse && next_il < hi_ && n_embd_ <= 4096) {
             const Block& NB = blocks_[(size_t) next_il];
             const int next_pass = next_il >= core_start_ && next_il < core_end_ ? pass_ : 0;
             const bool next_looped = next_pass > 0;
@@ -2238,6 +2269,7 @@ void Inkling2::tail_rows(int il, int n) {
         const int next_il = il + 1;
         const bool graph_split = whole_first_layers() > 0 && pass_ == 0 && next_il == lo_ + whole_first_layers();
         const bool can_fuse_next = whole_rec_ && !rows_of_ && !loop_restart && !graph_split && next_il < hi_ &&
+                                   !(loopcd_hidden_ != 0.f && il == core_end_ - 1) &&
                                    n_embd_ <= 3072 && sum_threads(n_embd_) == 1024;
         if (n > 1) {
             if (n <= kConvFew && can_fuse_next) {
@@ -2457,8 +2489,19 @@ size_t Inkling2::extra_bytes() const {
 // On a layer split the next card goes on from these and r_: what crosses is the stream, the four blocks' starts the
 // mixes read, the loop's bank and the drafter's taps (ds_tap_).
 float* Inkling2::carried(int i) {
-    if (i >= kBlocks + 2) return ds_tap_ ? ds_tap_ + (size_t) (i - kBlocks - 2) * buf_rows_ * n_embd_ : nullptr;
-    return i < kBlocks ? bl_[i] : i == kBlocks ? bank_ : bank_out_;
+    if (i < kBlocks) return bl_[i];
+    if (i == kBlocks) return bank_;
+    if (i == kBlocks + 1) return bank_out_;
+    int k = i - (kBlocks + 2);
+    if (ds_file_) {
+        if (k < kDsTaps) return ds_tap_ ? ds_tap_ + (size_t) k * buf_rows_ * n_embd_ : nullptr;
+        k -= kDsTaps;
+    }
+    if (loopcd_hidden_ != 0.f) {
+        if (k == 0) return cd_h1_;
+        if (k == 1) return cd_bl2_;
+    }
+    return nullptr;
 }
 
 void Inkling2::carry_at(float* at) {
@@ -2466,7 +2509,15 @@ void Inkling2::carry_at(float* at) {
     for (int i = 0; i < kBlocks; ++i) bl_[i] = place(i);
     bank_ = place(kBlocks);
     bank_out_ = place(kBlocks + 1);
-    if (ds_file_) ds_tap_ = at ? at + (size_t) (kBlocks + 2) * rows_ * n_embd_ : ds_home_;
+    int off = kBlocks + 2;
+    if (ds_file_) {
+        ds_tap_ = at ? at + (size_t) off * rows_ * n_embd_ : ds_home_;
+        off += kDsTaps;
+    }
+    if (loopcd_hidden_ != 0.f) {
+        cd_h1_ = at ? at + (size_t) off * rows_ * n_embd_ : cd_home_[0];
+        cd_bl2_ = at ? at + (size_t) (off + 1) * rows_ * n_embd_ : cd_home_[1];
+    }
 }
 
 void Inkling2::save_layer(int il, int64_t pos, uint8_t* dst) { save_slots(il, -1, pos, dst); }

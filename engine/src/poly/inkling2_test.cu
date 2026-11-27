@@ -1250,6 +1250,18 @@ void case_small() {
         compare("ink_softcap: the rows past the vocabulary are -inf", std::vector<float>{(float) pads_ok},
                 std::vector<double>{(double) rows * (n_all - n_keep)}, 0.0);
     }
+    {   // ink_loopcd_extrap: in-place dst[i] += omega * (dst[i] - ref[i]), and omega == 0 no-op
+        const size_t n = 3 * (size_t) kEmbd + 17;
+        const auto dst0 = randv(n, 3.0f), ref0 = randv(n, 3.0f);
+        Dev<float> dd(dst0), dr(ref0);
+        ink_loopcd_extrap(dd, dr, 0.0f, n, stream());
+        compare("ink_loopcd_extrap (omega 0 no-op)", dd.get(), std::vector<double>(dst0.begin(), dst0.end()), 0.0);
+        const float omega = 0.2f;
+        ink_loopcd_extrap(dd, dr, omega, n, stream());
+        std::vector<double> want(n);
+        for (size_t i = 0; i < n; ++i) want[i] = (double) dst0[i] + (double) omega * ((double) dst0[i] - (double) ref0[i]);
+        compare("ink_loopcd_extrap (omega 0.2)", dd.get(), want, 1e-5);
+    }
 }
 
 // ---- the attention ----

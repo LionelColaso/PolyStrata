@@ -16809,6 +16809,42 @@
    "retired_in": ""
   },
   {
+   "name": "STRATA_INK_LOOPCD_HIDDEN",
+   "backends": [
+    "cuda-hip",
+    "metal"
+   ],
+   "reads": [
+    {
+     "file": "engine/src/poly/inkling2.cpp",
+     "line": 235,
+     "backend": "cuda-hip",
+     "fn": "getenv"
+    }
+   ],
+   "parse": "float",
+   "default_state": null,
+   "code_default": "0",
+   "engine_sets": [],
+   "engine_defaults": [],
+   "launch_files": [],
+   "launch_sets": [],
+   "launch_reads": [],
+   "doc_mentions": [
+    "docs/models/inkling.md:371"
+   ],
+   "first_commit": "",
+   "first_date": "2026-11-26",
+   "since": null,
+   "last_commit": "",
+   "last_date": "2026-11-26",
+   "status": "opt-in",
+   "owner": "poly",
+   "note": "Inkling 2: optional LoopCD-Hidden extrapolation weight (0 to 1, default 0 = off) overriding --loopcd-hidden. Extrapolates pass-1 to final-pass hidden state at the loop core exit across CUDA, HIP, and Metal.",
+   "retire_after": "",
+   "retired_in": ""
+  },
+  {
    "name": "STRATA_INK_MMA75",
    "backends": [
     "cuda-hip"

@@ -540,6 +540,20 @@ int situ_gates() {
     return bad;
 }
 
+int loopcd_extrap() {
+    const size_t n = 3 * 2304 + 17;
+    const auto dst0 = values(n, 3.0f), ref0 = values(n, 2.5f);
+    Buffer D(dst0), R(ref0);
+    ink_loopcd_extrap(D.as(), R.as(), 0.0f, n, nullptr);
+    int bad = compare(D.read(n), dst0, "ink_loopcd_extrap (omega 0 no-op)", 0.0f);
+    const float omega = 0.2f;
+    ink_loopcd_extrap(D.as(), R.as(), omega, n, nullptr);
+    std::vector<float> want(n);
+    for (size_t i = 0; i < n; ++i) want[i] = dst0[i] + omega * (dst0[i] - ref0[i]);
+    bad += compare(D.read(n), want, "ink_loopcd_extrap (omega 0.2)", 1e-5f);
+    return bad;
+}
+
 }  // namespace
 
 int main() {
@@ -557,6 +571,7 @@ int main() {
     bad += conv_mixes(1, 1) + conv_mixes(1, 3) + conv_mixes(4, 1) + conv_mixes(4, 3);
     bad += qkv();
     bad += situ_gates();
+    bad += loopcd_extrap();
     std::printf("%s\n", bad ? "FAILED" : "all passed");
     return bad != 0;
 }

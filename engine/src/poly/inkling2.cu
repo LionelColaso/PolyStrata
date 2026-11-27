@@ -1444,6 +1444,14 @@ __global__ void ink_softcap_kernel(float* logits, int n_keep, int n_all, int row
     logits[idx] = (int) (idx % n_all) < n_keep ? cap * tanhf(logits[idx] / cap) : -INFINITY;
 }
 
+__global__ void ink_loopcd_extrap_kernel(float* dst, const float* __restrict__ ref, float omega, size_t n) {
+    const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+    if (i < n) {
+        const float v = dst[i];
+        dst[i] = v + omega * (v - ref[i]);
+    }
+}
+
 constexpr int kAttnThreads = 1024;   // a block of the softmax kernel
 constexpr int kMaxPer = 4;           // the most query heads on one key head
 constexpr int kLaneHalves = 4;       // the most halves of a cache row's head a lane holds: heads of up to 128 values
@@ -4069,6 +4077,12 @@ void ink_softcap(float* logits, int n_keep, int n_all, int rows, float cap, void
     if (rows <= 0) return;
     ink_softcap_kernel<<<grid((size_t) rows * n_all, 256), 256, 0, cs(stream)>>>(logits, n_keep, n_all, rows, cap);
     launched("ink_softcap");
+}
+
+void ink_loopcd_extrap(float* dst, const float* ref, float omega, size_t n, void* stream) {
+    if (n == 0 || omega == 0.0f) return;
+    ink_loopcd_extrap_kernel<<<grid(n, 256), 256, 0, cs(stream)>>>(dst, ref, omega, n);
+    launched("ink_loopcd_extrap");
 }
 
 // The warps of a block of the value kernel: as many as have their sums in a block's shared memory.

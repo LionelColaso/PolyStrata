@@ -623,6 +623,14 @@ void ink_softcap(float* logits, int n_keep, int n_all, int rows, float cap, void
     elem(a, 2, (size_t) rows * n_all, stream);
 }
 
+void ink_loopcd_extrap(float* dst, const float* ref, float omega, size_t n, void* stream) {
+    if (n == 0 || omega == 0.0f) return;
+    Args a;
+    a.p[0] = dst, a.p[1] = ref;
+    a.f[0] = omega;
+    elem(a, 3, n, stream);
+}
+
 // ---- the attention ----
 
 // online softmax: no scores are written out

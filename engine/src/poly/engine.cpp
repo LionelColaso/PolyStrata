@@ -2158,8 +2158,10 @@ std::unique_ptr<Engine> Engine::open(const Options& o) {
     if (o.cache_bias > 0.f && !qwen35 && !inkling)
         throw std::runtime_error("--cache-bias is supported for qwen35moe and Inkling 2 models; this is a '" + name +
                                  "' model");
-    if ((!o.attn_requant.empty() || o.loop_bf16 || o.prompt_int8 >= 0) && !inkling)
-        throw std::runtime_error("--attn-requant, --loop-bf16 and --prompt-int8 / --no-prompt-int8 are Inkling 2's; this is a '" + name + "' model");
+    if ((!o.attn_requant.empty() || o.loop_bf16 || o.prompt_int8 >= 0 || o.loopcd_hidden != 0.f) && !inkling)
+        throw std::runtime_error("--attn-requant, --loop-bf16, --loopcd-hidden and --prompt-int8 / --no-prompt-int8 are Inkling 2's; this is a '" + name + "' model");
+    if (!std::isfinite(o.loopcd_hidden) || o.loopcd_hidden < 0.f || o.loopcd_hidden > 1.f)
+        throw std::runtime_error("--loopcd-hidden must be between 0 and 1");
     if (o.expert_gpu >= 0 && (!inkling || !o.layer_split.empty()))
         throw std::runtime_error("--expert-gpu is Inkling 2's, on one card beside it (no --layer-split); this is a '" +
                                  name + "' model");

@@ -74,7 +74,7 @@ protected:
     // A call's residual streams and the core's bank from one layer run to the next: read() takes the calls through
     // the runs a group at a time.  With the drafter, its taps of three runs and the final normed state too, which
     // ds_commit() reads at the call's last layer run (ds_tap_'s four blocks).
-    int carry_rows() const override { return kBlocks + 2 + (ds_file_ ? kDsTaps : 0); }
+    int carry_rows() const override { return kBlocks + 2 + (ds_file_ ? kDsTaps : 0) + (loopcd_hidden_ != 0.f ? 2 : 0); }
     void carry_at(float* at) override;
     float* carried(int i) override;
     void save_run(int il, int64_t pos, uint8_t* dst) override;
@@ -297,6 +297,10 @@ private:
     float* kvw_ = nullptr;                           ///< their halves, keys then values (kvq8_)
     size_t kvw_halves_ = 0;
     float* scores_ = nullptr;   ///< score_ where it is apart from the scratch (scores_apart())
+    // Optional LoopCD-Hidden (--loopcd-hidden / STRATA_INK_LOOPCD_HIDDEN): extrapolate pass-1 -> final-pass state
+    float loopcd_hidden_ = 0.f;
+    float *cd_h1_ = nullptr, *cd_bl2_ = nullptr;
+    float* cd_home_[2] = {};
 };
 
 }  // namespace strata::poly
